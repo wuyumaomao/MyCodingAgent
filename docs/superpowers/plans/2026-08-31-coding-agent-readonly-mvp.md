@@ -15,7 +15,7 @@
 - CLI 是唯一运行入口，不添加 HTTP 服务。
 - 首个 provider 使用支持原生 tool calling 的 OpenAI-compatible endpoint。
 - 工具只能访问解析出的 Git 仓库根目录及其子目录。
-- 拒绝绝对路径、`..` 路径穿越和逃逸出仓库的符号链接。
+- 允许仓库内绝对路径和解析后仍位于仓库内的 `..` 路径；拒绝解析后逃逸出仓库的路径和符号链接。
 - `listfiles` 默认最大深度为 4、最多返回 200 项；`readfile` 默认最多读取 64 KiB。
 - 单个任务最多执行 4 轮工具调用；模型返回无 tool call 时结束。
 - MVP 只提供 `listfiles` 和 `readfile`，不提供写文件或 Shell 工具。
@@ -104,7 +104,7 @@ def test_workspace_rejects_symlink_escape(sample_git_repo, tmp_path):
 
 - [ ] **步骤 3：实现根目录解析和真实路径包含校验**
 
-使用 `subprocess.run(["git", "-C", str(start), "rev-parse", "--show-toplevel"], check=True, capture_output=True, text=True)`，将输出转换为 resolved `Path`。`Workspace.resolve_relative` 拒绝绝对路径，规范化候选路径，调用 `Path.resolve(strict=False)`，再使用 `Path.is_relative_to(root)` 强制包含关系。定义稳定异常类型和用户安全的错误消息。
+使用 `subprocess.run(["git", "-C", str(start), "rev-parse", "--show-toplevel"], check=True, capture_output=True, text=True)`，将输出转换为 resolved `Path`。`Workspace.resolve_relative` 接受相对路径或绝对路径，规范化候选路径，调用 `Path.resolve(strict=False)`，再使用 `Path.is_relative_to(root)` 强制包含关系。定义稳定异常类型和用户安全的错误消息。
 
 - [ ] **步骤 4：运行测试确认通过**
 
@@ -206,7 +206,7 @@ def test_readfile_returns_stable_errors(sample_git_repo):
 
 - [ ] **步骤 3：实现受限的 UTF-8 读取**
 
-要求 `path` 为非空相对路径，通过 `Workspace` 解析，拒绝目录，最多读取 `max_bytes + 1` 字节，超限返回 `file_too_large`。将文件不存在、权限错误和解码错误转换为稳定错误类型，错误中不暴露绝对路径。
+要求 `path` 为非空路径，通过 `Workspace` 解析，允许仓库内绝对路径和解析后仍位于仓库内的 `..` 路径，拒绝目录，最多读取 `max_bytes + 1` 字节，超限返回 `file_too_large`。将文件不存在、权限错误和解码错误转换为稳定错误类型，错误中不暴露绝对路径。
 
 - [ ] **步骤 4：运行测试确认通过**
 

@@ -12,6 +12,17 @@ def test_readfile_returns_utf8_text(sample_git_repo):
     assert "Sample Repository" in result["content"]
 
 
+def test_readfile_allows_absolute_path_inside_repository(sample_git_repo):
+    path = str(sample_git_repo / "README.md")
+    result = ReadFileTool(Workspace(sample_git_repo)).execute({"path": path})
+    assert result["ok"] is True
+
+
+def test_readfile_allows_parent_path_that_stays_inside(sample_git_repo):
+    result = ReadFileTool(Workspace(sample_git_repo)).execute({"path": "src/../README.md"})
+    assert result["ok"] is True
+
+
 def test_readfile_returns_stable_errors(sample_git_repo):
     result = ReadFileTool(Workspace(sample_git_repo)).execute({"path": "missing.txt"})
     assert result == {"ok": False, "error": {"type": "file_not_found", "message": "File not found"}}
