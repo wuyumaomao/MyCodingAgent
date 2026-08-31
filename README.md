@@ -4,11 +4,11 @@
 
 ## 项目状态
 
-项目处于初始化阶段，当前仅完成基础说明文档。
+项目处于只读 MVP 阶段，当前支持通过 CLI 读取并解释本地 Git 仓库。
 
 ## 项目目标
 
-逐步构建一个能够理解开发任务、制定执行计划、调用工具并交付代码变更的 Coding Agent。
+逐步构建一个能够理解开发任务、构造上下文、调用工具并交付结果的 Coding Agent。
 
 计划关注以下能力：
 
@@ -20,14 +20,30 @@
 
 ## 快速开始
 
-当前尚未确定运行方式和技术栈。
+环境要求：Python 3.11+。
 
-后续会在确定实现方案后补充：
+安装开发依赖：
 
-- 环境要求
-- 安装步骤
-- 启动命令
-- 基本使用示例
+```bash
+python -m pip install -e ".[dev]"
+```
+
+配置模型服务：
+
+```bash
+set CODING_AGENT_API_KEY=your-api-key
+set CODING_AGENT_MODEL=your-model
+set CODING_AGENT_BASE_URL=https://api.openai.com/v1
+```
+
+运行只读查询：
+
+```bash
+coding-agent "解释这个仓库的启动和测试脚本"
+coding-agent "package.json 里有哪些可用命令" --repo .
+```
+
+当前 MVP 仅提供 `listfiles` 和 `readfile` 两个只读工具，不会修改文件或执行 Shell 命令。
 
 ## 开发约定
 
@@ -38,8 +54,7 @@
 
 ## 后续计划
 
-1. 明确 Agent 的第一阶段使用场景
-2. 选择运行形态和技术栈
-3. 设计最小可行的执行闭环
-4. 建立测试与验证流程
-
+1. 增加 `writefile` 和变更预览
+2. 增加 Shell/测试工具及审批机制
+3. 增加运行状态持久化和断点恢复
+4. 增加本地 HTTP 服务和 IDE 客户端
