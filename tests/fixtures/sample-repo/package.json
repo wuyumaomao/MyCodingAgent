@@ -1,0 +1,7 @@
+{
+  "name": "sample-repo",
+  "scripts": {
+    "dev": "node src/index.js",
+    "test": "node tests/index.test.js"
+  }
+}
