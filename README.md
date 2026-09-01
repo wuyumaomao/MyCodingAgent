@@ -47,6 +47,14 @@ coding-agent "package.json 里有哪些可用命令" --repo .
 
 当前 MVP 仅提供 `listfiles` 和 `readfile` 两个只读工具，不会修改文件或执行 Shell 命令。
 
+每次 CLI 提问都会创建一个独立的 run。运行结束后，CLI 会在标准错误中显示 run ID 和 trace 路径：
+
+```text
+.coding-agent/runs/<run-id>/trace.json
+```
+
+trace 会记录模型请求、工具调用、工具结果、错误和最终回答，且不会写入目标仓库或保存 API Key。
+
 ## 开发约定
 
 - 先明确目标和边界，再开始实现

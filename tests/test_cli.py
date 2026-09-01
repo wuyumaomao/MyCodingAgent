@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from argparse import Namespace
+import json
 
 from coding_agent.cli import main
 from coding_agent.config import Settings
@@ -61,11 +62,47 @@ def test_cli_uses_repo_argument_and_renders_answer(monkeypatch, sample_git_repo,
     assert capsys.readouterr().out.strip() == "ok"
 
 
-def test_cli_returns_error_when_configuration_is_missing(monkeypatch, capsys):
+def test_cli_returns_error_when_configuration_is_missing(monkeypatch, sample_git_repo, tmp_path, capsys):
+    monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("CODING_AGENT_API_KEY", raising=False)
     monkeypatch.delenv("CODING_AGENT_MODEL", raising=False)
-    assert main(["Explain scripts"]) != 0
-    assert "API key" in capsys.readouterr().err
+    monkeypatch.setattr("coding_agent.cli.RUNS_ROOT", tmp_path / "runs")
+    assert main(["Explain scripts", "--repo", str(sample_git_repo)]) != 0
+    captured = capsys.readouterr()
+    assert "API key" in captured.err
+    trace_files = list((tmp_path / "runs").glob("*/trace.json"))
+    assert len(trace_files) == 1
+    assert __import__("json").loads(trace_files[0].read_text(encoding="utf-8"))["status"] == "failed"
+
+
+def test_cli_creates_trace_for_success(monkeypatch, sample_git_repo, tmp_path, capsys):
+    monkeypatch.setenv("CODING_AGENT_API_KEY", "test-key")
+    monkeypatch.setenv("CODING_AGENT_MODEL", "test-model")
+    monkeypatch.setattr("coding_agent.cli.RUNS_ROOT", tmp_path / "runs")
+    monkeypatch.setattr("coding_agent.cli.LLMClient", lambda **kwargs: FakeClient([AssistantTurn("ok", [])]))
+    assert main(["Explain", "--repo", str(sample_git_repo)]) == 0
+    captured = capsys.readouterr()
+    assert captured.out.strip() == "ok"
+    assert "Run:" in captured.err
+    assert "Trace:" in captured.err
+    trace_files = list((tmp_path / "runs").glob("*/trace.json"))
+    assert len(trace_files) == 1
+    assert json.loads(trace_files[0].read_text(encoding="utf-8"))["status"] == "completed"
+
+
+def test_cli_creates_failed_trace(monkeypatch, sample_git_repo, tmp_path, capsys):
+    monkeypatch.setenv("CODING_AGENT_API_KEY", "test-key")
+    monkeypatch.setenv("CODING_AGENT_MODEL", "test-model")
+    monkeypatch.setattr("coding_agent.cli.RUNS_ROOT", tmp_path / "runs")
+    def fail_client(**kwargs):
+        raise RuntimeError("provider down")
+    monkeypatch.setattr("coding_agent.cli.LLMClient", fail_client)
+    assert main(["Explain", "--repo", str(sample_git_repo)]) != 0
+    captured = capsys.readouterr()
+    assert "Error:" in captured.err
+    trace_files = list((tmp_path / "runs").glob("*/trace.json"))
+    assert len(trace_files) == 1
+    assert json.loads(trace_files[0].read_text(encoding="utf-8"))["status"] == "failed"
 
 
 def test_cli_runs_from_nested_directory_with_fake_provider(monkeypatch, sample_git_repo, capsys):
