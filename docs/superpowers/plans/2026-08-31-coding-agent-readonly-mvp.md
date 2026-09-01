@@ -6,7 +6,7 @@
 
 **架构：** 单进程 CLI 之上提供 `AgentService`。`AgentLoop` 管理消息历史和终止条件，`LLMClient` 封装 OpenAI-compatible SDK，`ToolRegistry` 执行受工作空间限制的工具，`ContextBuilder` 生成初始仓库清单。
 
-**技术栈：** Python 3.11+、`argparse`、`pathlib`、`subprocess`、`openai` Python SDK、`pathspec`、`pytest` 和 `pyproject.toml`。安装可使用 `uv` 或 `pip`；下方命令统一使用 `python -m pip`，不依赖额外包管理器。
+**技术栈：** Python 3.11+、`argparse`、`pathlib`、`subprocess`、`openai` Python SDK、`pathspec`、`python-dotenv`、`pytest` 和 `pyproject.toml`。使用 `uv` 管理环境和依赖。
 
 **规格文档：** `docs/superpowers/specs/2026-08-31-coding-agent-readonly-mvp-prd.md`
 
@@ -407,7 +407,7 @@ def test_cli_uses_repo_argument_and_renders_answer(monkeypatch, sample_git_repo,
 
 - [ ] **步骤 3：实现配置优先级**
 
-解析位置参数 `query`、可选 `--repo`、`--model` 和 `--base-url`。读取 `CODING_AGENT_API_KEY`、`CODING_AGENT_MODEL` 和 `CODING_AGENT_BASE_URL`；应用 CLI 覆盖、环境变量，再使用默认 Base URL。当 API Key 或模型缺失时返回清晰的非零错误。
+解析位置参数 `query`、可选 `--repo`、`--model` 和 `--base-url`。从当前工作目录的 `.env` 加载配置，再读取 `CODING_AGENT_API_KEY`、`CODING_AGENT_MODEL` 和 `CODING_AGENT_BASE_URL`；应用 CLI 覆盖、已有环境变量、`.env` 值，再使用默认 Base URL。当 API Key 或模型缺失时返回清晰的非零错误。
 
 - [ ] **步骤 4：实现 CLI 编排和输出**
 
@@ -419,7 +419,7 @@ def test_cli_uses_repo_argument_and_renders_answer(monkeypatch, sample_git_repo,
 
 - [ ] **步骤 6：更新 README 的快速开始**
 
-记录 Python 3.11+、`python -m pip install -e ".[dev]"` 安装方式、三个环境变量和 PRD 中的两个示例命令。明确 MVP 只读，并且仅支持 `listfiles` 和 `readfile`。
+记录 Python 3.11+、`uv sync --extra dev` 安装方式、`.env.example` 配置模板、三个环境变量和 PRD 中的两个示例命令。明确 MVP 只读，并且仅支持 `listfiles` 和 `readfile`。
 
 - [ ] **步骤 7：运行完整测试套件**
 

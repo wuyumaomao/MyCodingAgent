@@ -25,16 +25,18 @@
 安装开发依赖：
 
 ```bash
-python -m pip install -e ".[dev]"
+uv sync --extra dev
 ```
 
 配置模型服务：
 
+复制 `.env.example` 为 `.env`，然后填写真实配置：
+
 ```bash
-set CODING_AGENT_API_KEY=your-api-key
-set CODING_AGENT_MODEL=your-model
-set CODING_AGENT_BASE_URL=https://api.openai.com/v1
+copy .env.example .env
 ```
+
+`.env` 会被自动读取且不会提交到 Git。也可以直接设置同名环境变量。
 
 运行只读查询：
 

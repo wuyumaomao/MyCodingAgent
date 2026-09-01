@@ -34,6 +34,22 @@ def test_settings_use_cli_over_environment(monkeypatch):
     assert settings.base_url == "https://env.example/v1"
 
 
+def test_settings_load_dotenv_file(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    for name in ("CODING_AGENT_API_KEY", "CODING_AGENT_MODEL", "CODING_AGENT_BASE_URL"):
+        monkeypatch.delenv(name, raising=False)
+    (tmp_path / ".env").write_text(
+        "CODING_AGENT_API_KEY=file-key\n"
+        "CODING_AGENT_MODEL=file-model\n"
+        "CODING_AGENT_BASE_URL=https://file.example/v1\n",
+        encoding="utf-8",
+    )
+    settings = Settings.from_args_and_env(Namespace(api_key=None, model=None, base_url=None))
+    assert settings.api_key == "file-key"
+    assert settings.model == "file-model"
+    assert settings.base_url == "https://file.example/v1"
+
+
 def test_cli_uses_repo_argument_and_renders_answer(monkeypatch, sample_git_repo, capsys):
     monkeypatch.setenv("CODING_AGENT_API_KEY", "test-key")
     monkeypatch.setenv("CODING_AGENT_MODEL", "test-model")

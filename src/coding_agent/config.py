@@ -3,6 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 import os
 from argparse import Namespace
+from pathlib import Path
+
+from dotenv import load_dotenv
 
 
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
@@ -20,6 +23,7 @@ class Settings:
 
     @classmethod
     def from_args_and_env(cls, args: Namespace) -> "Settings":
+        load_dotenv(dotenv_path=Path.cwd() / ".env")
         api_key = getattr(args, "api_key", None) or os.getenv("CODING_AGENT_API_KEY")
         model = getattr(args, "model", None) or os.getenv("CODING_AGENT_MODEL")
         base_url = (
