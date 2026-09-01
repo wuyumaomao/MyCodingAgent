@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from coding_agent.agent import AgentLoop
 from coding_agent.context import build_repository_context
 from coding_agent.llm import InvalidToolArguments
@@ -8,6 +10,7 @@ from coding_agent.repository import Workspace
 from coding_agent.tools.listfiles import ListFilesTool
 from coding_agent.tools.readfile import ReadFileTool
 from coding_agent.tools.registry import ToolRegistry
+from coding_agent.trace import RunRecorder
 
 
 class FakeLLM:
@@ -73,3 +76,27 @@ def test_loop_returns_tool_error_to_model(sample_git_repo):
     )
     assert answer == "The path is outside the workspace."
     assert 'workspace_violation' in llm.messages[-1][-1]["content"]
+
+
+def test_agent_loop_records_model_and_tool_events(sample_git_repo, tmp_path):
+    recorder = RunRecorder.create("Explain scripts", sample_git_repo, tmp_path / "runs")
+    llm = FakeLLM(
+        [
+            AssistantTurn(None, [ToolCall("call-1", "readfile", {"path": "package.json"})]),
+            AssistantTurn("The repository uses npm scripts.", []),
+        ]
+    )
+    answer = AgentLoop(
+        llm,
+        make_registry(sample_git_repo),
+        build_repository_context,
+        recorder=recorder,
+    ).run("Explain scripts", Workspace(sample_git_repo))
+    document = json.loads(recorder.trace_path.read_text(encoding="utf-8"))
+    event_types = [event["type"] for event in document["events"]]
+    assert answer == "The repository uses npm scripts."
+    assert "llm_request" in event_types
+    assert "llm_response" in event_types
+    assert "tool_call" in event_types
+    assert "tool_result" in event_types
+    assert event_types[-1] == "final_answer"

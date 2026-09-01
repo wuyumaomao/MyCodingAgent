@@ -9,6 +9,7 @@ from .llm import InvalidToolArguments
 from .models import AssistantTurn, ToolCall
 from .repository import Workspace
 from .tools.registry import ToolRegistry
+from .trace import RunRecorder
 
 
 class AgentError(RuntimeError):
@@ -22,6 +23,7 @@ class AgentLoop:
         registry: ToolRegistry,
         context_builder: Callable[[Workspace], str] = build_repository_context,
         *,
+        recorder: RunRecorder | None = None,
         max_rounds: int = 4,
     ) -> None:
         if max_rounds <= 0:
@@ -29,6 +31,7 @@ class AgentLoop:
         self.llm_client = llm_client
         self.registry = registry
         self.context_builder = context_builder
+        self.recorder = recorder
         self.max_rounds = max_rounds
 
     def run(self, query: str, workspace: Workspace) -> str:
@@ -44,18 +47,52 @@ class AgentLoop:
             {"role": "user", "content": query},
         ]
         for round_number in range(1, self.max_rounds + 1):
+            if self.recorder:
+                self.recorder.record("llm_request", round=round_number, message_count=len(messages))
             try:
                 turn: AssistantTurn = self.llm_client.complete(messages, self.registry.definitions())
             except InvalidToolArguments as exc:
+                if self.recorder:
+                    self.recorder.fail("invalid_tool_arguments", "The model returned invalid tool arguments")
                 raise AgentError("The model returned invalid tool arguments") from exc
             except Exception as exc:
+                if self.recorder:
+                    self.recorder.fail("provider_error", "The model request failed")
                 raise AgentError("The model request failed") from exc
+            if self.recorder:
+                self.recorder.record(
+                    "llm_response",
+                    round=round_number,
+                    has_content=bool(turn.content),
+                    tool_call_count=len(turn.tool_calls),
+                )
             if not turn.tool_calls:
-                return turn.content or "The model returned an empty response."
+                answer = turn.content or "The model returned an empty response."
+                if self.recorder:
+                    self.recorder.complete(answer)
+                return answer
             messages.append(_assistant_tool_message(turn))
             for call in turn.tool_calls:
-                messages.append(_tool_result_message(call, self._execute(call)))
-        return f"Reached the tool-call limit of {self.max_rounds} rounds before the task was complete."
+                if self.recorder:
+                    self.recorder.record(
+                        "tool_call",
+                        id=call.id,
+                        name=call.name,
+                        arguments=call.arguments,
+                    )
+                result = self._execute(call)
+                if self.recorder:
+                    self.recorder.record(
+                        "tool_result",
+                        id=call.id,
+                        name=call.name,
+                        result=result,
+                    )
+                messages.append(_tool_result_message(call, result))
+        answer = f"Reached the tool-call limit of {self.max_rounds} rounds before the task was complete."
+        if self.recorder:
+            self.recorder.fail("round_limit", "Reached the tool-call limit")
+        return answer
 
     def _execute(self, call: ToolCall) -> dict[str, Any]:
         try:
