@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from openai import APITimeoutError, OpenAI
 
-from .models import AssistantTurn, ToolCall
-
-
-class InvalidToolArguments(ValueError):
-    """Raised when a provider returns malformed tool arguments."""
+from .response_parser import (
+    InvalidToolArguments,
+    LLMResponseError,
+    ParsedResponse,
+    ResponseParser,
+)
 
 
 class LLMTimeoutError(TimeoutError):
@@ -26,6 +26,7 @@ class LLMClient:
         timeout: float = 60.0,
     ) -> None:
         self.model = model
+        self.response_parser = ResponseParser()
         kwargs: dict[str, Any] = {"api_key": api_key, "timeout": timeout}
         if base_url:
             kwargs["base_url"] = base_url
@@ -49,24 +50,6 @@ class LLMClient:
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
-    ) -> AssistantTurn:
+    ) -> ParsedResponse:
         response = self._request(messages, tools)
-        message = response.choices[0].message
-        tool_calls: list[ToolCall] = []
-        for call in message.tool_calls or []:
-            arguments = call.function.arguments
-            if isinstance(arguments, str):
-                try:
-                    arguments = json.loads(arguments)
-                except json.JSONDecodeError as exc:
-                    raise InvalidToolArguments("Tool arguments are not valid JSON") from exc
-            if not isinstance(arguments, dict):
-                raise InvalidToolArguments("Tool arguments must be a JSON object")
-            tool_calls.append(#把模型返回组装成toolcall
-                ToolCall(
-                    id=str(call.id),
-                    name=str(call.function.name),
-                    arguments=arguments,
-                )
-            )
-        return AssistantTurn(content=message.content, tool_calls=tool_calls)
+        return self.response_parser.parse(response)

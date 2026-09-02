@@ -5,7 +5,7 @@ from pathlib import Path
 import sys
 from typing import Sequence
 
-from .agent import AgentError, AgentLoop, AgentService
+from .agent import AgentError, AgentLimits, AgentLoop, AgentService
 from .config import ConfigError, Settings
 from .llm import LLMClient
 from .repository import RepositoryError, Workspace, resolve_repository
@@ -24,8 +24,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--repo", type=Path, default=Path.cwd())
     parser.add_argument("--model")
     parser.add_argument("--base-url")
-    parser.add_argument("--debug", action="store_true", help="Persist detailed message trace")
     parser.add_argument("--timeout", type=float)
+    parser.add_argument("--max-tool-calls", type=int, default=3)
     return parser
 
 
@@ -38,9 +38,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         repository = resolve_repository(args.repo)
         workspace = Workspace(repository)
-        recorder = RunRecorder.create(
-            " ".join(args.query), repository, RUNS_ROOT, debug=args.debug
-        )
+        recorder = RunRecorder.create(" ".join(args.query), repository, RUNS_ROOT)
         settings = Settings.from_args_and_env(args)
         registry = ToolRegistry()
         listfiles = ListFilesTool(workspace)
@@ -64,7 +62,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             timeout=settings.timeout,
         )
         #cli装配好llm，tool-registry，encoder，contextbuilder给agentloop。run的时候传入query和workspace
-        service = AgentService(AgentLoop(llm_client, registry, recorder=recorder))
+        service = AgentService(
+            AgentLoop(
+                llm_client,
+                registry,
+                recorder=recorder,
+                limits=AgentLimits(max_calls_per_tool=args.max_tool_calls),
+            )
+        )
         answer = service.run(" ".join(args.query), workspace)
     except Exception as exc:#抛出了异常，记录是哪里出错了
         if recorder is not None and recorder.status == "running":
@@ -74,10 +79,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         if recorder is not None:
             print(f"Run: {recorder.run_id}", file=sys.stderr)
             print(f"Trace: {recorder.trace_path}", file=sys.stderr)
+            print(f"Report: {recorder.report_path}", file=sys.stderr)
         return 1
     if recorder is not None:
         print(f"Run: {recorder.run_id}", file=sys.stderr)
         print(f"Trace: {recorder.trace_path}", file=sys.stderr)
+        print(f"Report: {recorder.report_path}", file=sys.stderr)
     print(answer)
     return 0
 

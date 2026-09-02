@@ -1,26 +1,32 @@
-# Debug Trace 与调用 Span 实现计划
+# Debug Trace 与步骤耗时实现计划
+
+> **状态：已被 `2026-09-02-trace-report.md` 取代。** 当前实现不再提供 `--debug` 或 span；详细消息统一写入 `report.json`。
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans (recommended) to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**目标：** 在现有 run trace 上增加可选的完整消息调试信息和模块调用 span，使一次真实 API 运行既能复盘中间数据，也能还原调用方向。
+**目标：** 在现有 run trace 上增加可选的完整消息调试信息和模型/工具步骤耗时，使一次真实 API 运行能够简洁复盘中间数据和性能。
 
-**架构：** `RunRecorder` 继续是唯一 trace 持久化组件，新增 `debug` 开关和轻量 span 上下文管理器。span 以同一 `trace.json` 中的 `span_start`/`span_end` 事件表示父子调用关系；debug 只控制是否附加完整 messages、工具定义和规范化响应，不改变 Agent Loop 决策逻辑。
+**架构：** `RunRecorder` 继续是唯一 trace 持久化组件，新增 `debug` 开关；`AgentLoop` 直接在 `llm_response`、`tool_result` 和失败事件中写入 `duration_ms`。debug 只控制是否附加完整 messages、工具定义和规范化响应，不改变 Agent Loop 决策逻辑。
 
 **技术栈：** Python 3.11+、标准库 `contextlib`、`time`、`uuid`、`json`、`pytest`；不增加外部依赖。
 
 **规格文档：** `docs/superpowers/specs/2026-08-31-coding-agent-readonly-mvp-prd.md`
+
+## 设计修订（用户确认）
+
+为保持 debug trace 简洁，取消嵌套 span、`span_id`、`parent_span_id` 以及步骤级开始/结束时间。最终只在 `llm_response`、`tool_result`、失败事件和 run 顶层记录 `duration_ms`；本节修订优先于下方原始 span 任务描述。
 
 ## 全局约束
 
 - 默认 trace 行为和现有 CLI 保持兼容，`--debug` 默认关闭。
 - 所有事件仍按递增 `seq` 写入同一个 `trace.json`，并采用原子替换持久化。
 - debug 消息必须经过现有 `_sanitize()`；不得记录 API Key 或完整 SDK 对象。
-- span 只覆盖模块边界：AgentLoop、LLMClient、ToolRegistry/工具；不为每个普通辅助函数创建 span。
+- 只记录模型请求和工具执行等语义步骤的耗时，不为普通辅助函数创建独立事件。
 - 不访问真实网络的单元测试必须继续通过；真实 API 只作为手动集成验证。
 
 ---
 
-### 任务 1：扩展 RunRecorder 的 debug 和 span 能力
+### 任务 1：扩展 RunRecorder 的 debug 和耗时能力
 
 **文件：**
 - 修改：`src/coding_agent/trace.py`
@@ -29,7 +35,6 @@
 **接口：**
 - `RunRecorder.create(..., debug: bool = False) -> RunRecorder`
 - `RunRecorder.debug: bool`
-- `RunRecorder.span(component: str, operation: str) -> context manager`
 - `RunRecorder.record_debug(event_type: str, **payload: object) -> None`
 
 - [ ] **步骤 1：编写失败测试**
@@ -60,7 +65,7 @@ def test_span_events_include_parent_and_duration(tmp_path):
 
 - [ ] **步骤 3：实现最小功能**
 
-增加 `debug` 字段；`record_debug()` 在 debug 关闭时不写详细 payload，开启时写入经过 `_sanitize()` 的 payload。使用 `contextlib.contextmanager` 实现 span，进入时写 `span_start`，退出时写 `span_end`、状态和 `duration_ms`；通过 recorder 内部栈生成 `parent_span_id`。
+增加 `debug` 字段；`record_debug()` 在 debug 关闭时不写详细 payload，开启时写入经过 `_sanitize()` 的 payload。`complete()` 和 `fail()` 为 run 写入总 `duration_ms`，保持原子持久化。
 
 - [ ] **步骤 4：运行测试确认通过**
 
@@ -105,7 +110,7 @@ def test_agent_debug_trace_contains_message_history_and_tool_decision(sample_git
 
 - [ ] **步骤 3：实现最小记录逻辑**
 
-在 `AgentLoop.run()` 外层包裹 `AgentLoop/run` span；每轮 LLM 调用边界使用 `LLMClient/complete` span。调用前写 debug 请求（messages、工具定义），收到 `AssistantTurn` 后写规范化响应（content、tool call 名称和参数）。工具调用沿用现有事件并补充 span 父子关系。
+每轮 LLM 调用前记录开始时间，成功时将耗时写入 `llm_response`，失败时写入 `run_failed`；每次工具执行后将耗时写入 `tool_result`。调用前写 debug 请求（messages、工具定义），收到 `AssistantTurn` 后写规范化响应（content、tool call 名称和参数）。
 
 - [ ] **步骤 4：运行测试确认通过**
 
@@ -166,9 +171,9 @@ git commit -m "feat: add cli debug trace mode"
 **文件：**
 - 修改：`tests/test_trace_integration.py`
 
-- [ ] **步骤 1：补充 span 层级集成断言**
+- [ ] **步骤 1：补充步骤耗时集成断言**
 
-验证成功链路中存在 `AgentLoop → LLMClient` 和 `AgentLoop → ReadFileTool` 的 span，所有 `span_end` 都有对应 `span_start`，父 span ID 正确，事件 `seq` 严格递增。
+验证成功链路中的 `llm_response` 和 `tool_result` 都包含非负 `duration_ms`，事件 `seq` 严格递增。
 
 - [ ] **步骤 2：运行完整自动化验证**
 
@@ -181,7 +186,7 @@ git commit -m "feat: add cli debug trace mode"
 uv run coding-agent "请读取 README.md 和 pyproject.toml，说明运行和测试方式" --repo .\demo-repo --debug
 ```
 
-检查对应 `trace.json`：请求事件包含完整 messages，响应事件包含规范化 tool calls，span 字段可以还原调用方向，且 JSON 可解析。
+检查对应 `trace.json`：请求事件包含完整 messages，响应事件包含规范化 tool calls 和 `duration_ms`，工具结果包含 `duration_ms`，且 JSON 可解析。
 
 - [ ] **步骤 4：提交最终验证**
 

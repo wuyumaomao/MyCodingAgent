@@ -139,7 +139,7 @@ def test_cli_runs_from_nested_directory_with_fake_provider(monkeypatch, sample_g
     assert any(message[1]["content"].startswith("[Repository Context]") for message in client.messages)
 
 
-def test_cli_debug_flag_persists_full_llm_request(monkeypatch, sample_git_repo, tmp_path):
+def test_cli_outputs_report_path(monkeypatch, sample_git_repo, tmp_path, capsys):
     monkeypatch.setenv("CODING_AGENT_API_KEY", "test-key")
     monkeypatch.setenv("CODING_AGENT_MODEL", "test-model")
     monkeypatch.setattr("coding_agent.cli.RUNS_ROOT", tmp_path / "runs")
@@ -147,9 +147,10 @@ def test_cli_debug_flag_persists_full_llm_request(monkeypatch, sample_git_repo, 
         "coding_agent.cli.LLMClient",
         lambda **kwargs: FakeClient([AssistantTurn("ok", [])]),
     )
-    assert main(["Explain", "--debug", "--repo", str(sample_git_repo)]) == 0
-    trace = next((tmp_path / "runs").glob("*/trace.json"))
-    document = json.loads(trace.read_text(encoding="utf-8"))
+    assert main(["Explain", "--repo", str(sample_git_repo)]) == 0
+    assert "Report:" in capsys.readouterr().err
+    report = next((tmp_path / "runs").glob("*/report.json"))
+    document = json.loads(report.read_text(encoding="utf-8"))
     request = next(event for event in document["events"] if event["type"] == "llm_request")
     assert "messages" in request
 
@@ -167,3 +168,19 @@ def test_cli_passes_timeout_to_llm_client(monkeypatch, sample_git_repo, tmp_path
     monkeypatch.setattr("coding_agent.cli.LLMClient", make_client)
     assert main(["Explain", "--timeout", "12", "--repo", str(sample_git_repo)]) == 0
     assert received["timeout"] == 12.0
+
+
+def test_cli_passes_max_tool_calls(monkeypatch, sample_git_repo, tmp_path):
+    monkeypatch.setenv("CODING_AGENT_API_KEY", "test-key")
+    monkeypatch.setenv("CODING_AGENT_MODEL", "test-model")
+    monkeypatch.setattr("coding_agent.cli.RUNS_ROOT", tmp_path / "runs")
+    captured = {}
+
+    def make_service(loop):
+        captured["limit"] = loop.limits.max_calls_per_tool
+        return type("Service", (), {"run": lambda self, query, workspace: "ok"})()
+
+    monkeypatch.setattr("coding_agent.cli.AgentService", make_service)
+    monkeypatch.setattr("coding_agent.cli.LLMClient", lambda **kwargs: FakeClient([]))
+    assert main(["Explain", "--max-tool-calls", "5", "--repo", str(sample_git_repo)]) == 0
+    assert captured["limit"] == 5

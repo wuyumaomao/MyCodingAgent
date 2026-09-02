@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
-from contextlib import nullcontext
+from dataclasses import dataclass
+import time
 from typing import Any
 
-from .context import build_repository_context
-from .llm import InvalidToolArguments, LLMTimeoutError
+from .context import ConversationContext, build_repository_context
+from .llm import InvalidToolArguments, LLMResponseError, LLMTimeoutError
 from .models import AssistantTurn, ToolCall
 from .repository import Workspace
 from .tools.registry import ToolRegistry
@@ -17,81 +17,99 @@ class AgentError(RuntimeError):
     """Raised when the model cannot produce a usable turn."""
 
 
+@dataclass(frozen=True)
+class AgentLimits:
+    max_rounds: int = 10
+    max_calls_per_tool: int = 3
+
+    def __post_init__(self) -> None:
+        if self.max_rounds <= 0:
+            raise ValueError("max_rounds must be positive")
+        if self.max_calls_per_tool <= 0:
+            raise ValueError("max_calls_per_tool must be positive")
+
+
 class AgentLoop:
     def __init__(
         self,
         llm_client: Any,
         registry: ToolRegistry,
-        context_builder: Callable[[Workspace], str] = build_repository_context,
+        repository_context_builder: Callable[[Workspace], str] = build_repository_context,
         *,
         recorder: RunRecorder | None = None,
-        max_rounds: int = 4,
+        max_rounds: int | None = None,
+        limits: AgentLimits | None = None,
     ) -> None:
-        if max_rounds <= 0:
-            raise ValueError("max_rounds must be positive")
+        if limits is not None and max_rounds is not None:
+            raise ValueError("Pass limits or max_rounds, not both")
+        self.limits = limits or AgentLimits(max_rounds=max_rounds or 10)
         self.llm_client = llm_client
         self.registry = registry
-        self.context_builder = context_builder
+        self.repository_context_builder = repository_context_builder
         self.recorder = recorder
-        self.max_rounds = max_rounds
+        self.max_rounds = self.limits.max_rounds
+        self._tool_call_counts: dict[str, int] = {}
 
     def run(self, query: str, workspace: Workspace) -> str:
-        if self.recorder is None:
-            return self._run(query, workspace)
-        with self.recorder.span("AgentLoop", "run"):
-            return self._run(query, workspace)
-
-    def _run(self, query: str, workspace: Workspace) -> str:
-        messages: list[dict[str, Any]] = [
-            {
-                "role": "system",
-                "content": (
-                    "You are a read-only coding agent. Use only the provided tools, "
-                    "stay inside the repository workspace, and explain findings based on evidence."
-                ),
-            },
-            {"role": "system", "content": self.context_builder(workspace)},
-            {"role": "user", "content": query},
-        ]
+        context = ConversationContext(workspace, self.repository_context_builder)
+        context.add_user_request(query)
         for round_number in range(1, self.max_rounds + 1):
+            messages = context.messages()#获取要发送的信息
             tool_definitions = self.registry.definitions()
             if self.recorder:#record记录llm request
-                request_payload: dict[str, object] = {
-                    "round": round_number,
-                    "message_count": len(messages),
-                }
-                if self.recorder.debug:
-                    request_payload.update(messages=messages, tools=tool_definitions)
-                self.recorder.record("llm_request", **request_payload)
+                self.recorder.record(
+                    "llm_request",
+                    round=round_number,
+                    message_count=len(messages),
+                    report_payload={"messages": messages, "tools": tool_definitions},
+                )
+            request_started = time.perf_counter()
             try:#llm返回结果
-                with (
-                    self.recorder.span("LLMClient", "complete")
-                    if self.recorder
-                    else nullcontext()
-                ):
-                    turn: AssistantTurn = self.llm_client.complete(messages, tool_definitions)
+                turn: AssistantTurn = self.llm_client.complete(messages, tool_definitions)#在这里检查工具参数是否合法
             except LLMTimeoutError as exc:
                 if self.recorder:
-                    self.recorder.fail("timeout", "The model request timed out")
+                    self.recorder.fail(
+                        "timeout",
+                        "The model request timed out",
+                        duration_ms=_duration_ms(request_started),
+                    )
                 raise AgentError("The model request timed out") from exc
             except InvalidToolArguments as exc:
                 if self.recorder:
-                    self.recorder.fail("invalid_tool_arguments", "The model returned invalid tool arguments")
+                    self.recorder.fail(
+                        "invalid_tool_arguments",
+                        "The model returned invalid tool arguments",
+                        duration_ms=_duration_ms(request_started),
+                    )
                 raise AgentError("The model returned invalid tool arguments") from exc
+            except LLMResponseError as exc:
+                if self.recorder:
+                    self.recorder.fail(
+                        "invalid_response",
+                        "The model returned an invalid response",
+                        duration_ms=_duration_ms(request_started),
+                    )
+                raise AgentError("The model returned an invalid response") from exc
             except Exception as exc:
                 if self.recorder:
-                    self.recorder.fail("provider_error", "The model request failed")
+                    self.recorder.fail(
+                        "provider_error",
+                        "The model request failed",
+                        duration_ms=_duration_ms(request_started),
+                    )
                 raise AgentError("The model request failed") from exc
             if self.recorder:#record记录llm response
                 response_payload: dict[str, object] = {
                     "round": round_number,
                     "has_content": bool(turn.content),
                     "tool_call_count": len(turn.tool_calls),
+                    "duration_ms": _duration_ms(request_started),
                 }
-                if self.recorder.debug:
-                    response_payload.update(
-                        content=turn.content,
-                        tool_calls=[
+                self.recorder.record(
+                    "llm_response",
+                    report_payload={
+                        "content": turn.content,
+                        "tool_calls": [
                             {
                                 "id": call.id,
                                 "name": call.name,
@@ -99,14 +117,15 @@ class AgentLoop:
                             }
                             for call in turn.tool_calls
                         ],
-                    )
-                self.recorder.record("llm_response", **response_payload)
+                    },
+                    **response_payload,
+                )
             if not turn.tool_calls:#若非toolcall则视为结束
                 answer = turn.content or "The model returned an empty response."
                 if self.recorder:
                     self.recorder.complete(answer)
                 return answer
-            messages.append(_assistant_tool_message(turn))#工具调用来了，没结束，把turn的内容append到message
+            context.add_assistant_turn(turn)#工具调用来了，追加 assistant 消息
             for call in turn.tool_calls:#把工具调用记录写到trace
                 if self.recorder:
                     self.recorder.record(
@@ -115,20 +134,38 @@ class AgentLoop:
                         name=call.name,
                         arguments=call.arguments,
                     )
-                with (
-                    self.recorder.span("ToolRegistry", call.name)
-                    if self.recorder
-                    else nullcontext()
-                ):
+                current_count = self._tool_call_counts.get(call.name, 0)
+                if current_count >= self.limits.max_calls_per_tool:
+                    result = {
+                        "ok": False,
+                        "error": {
+                            "type": "tool_call_limit",
+                            "message": f"Tool {call.name} reached its call limit",
+                        },
+                    }
+                    if self.recorder:
+                        self.recorder.record(
+                            "tool_call_limit",
+                            name=call.name,
+                            max_calls=self.limits.max_calls_per_tool,
+                            observed=current_count,
+                        )
+                    tool_duration = 0.0
+                else:
+                    self._tool_call_counts[call.name] = current_count + 1
+                    tool_started = time.perf_counter()
                     result = self._execute(call)#执行call
+                    tool_duration = _duration_ms(tool_started)
                 if self.recorder:#记录工具调用的结果
                     self.recorder.record(
                         "tool_result",
                         id=call.id,
                         name=call.name,
-                        result=result,
+                        ok=result.get("ok"),
+                        duration_ms=tool_duration,
+                        report_payload={"result": result},
                     )
-                messages.append(_tool_result_message(call, result))#以role：tool的身份把工具结果append到message
+                context.add_tool_result(call, result)#追加 tool 结果消息
         answer = f"Reached the tool-call limit of {self.max_rounds} rounds before the task was complete."
         if self.recorder:#执行到循环外部了，则触发结束
             self.recorder.fail("round_limit", "Reached the tool-call limit")
@@ -143,35 +180,13 @@ class AgentLoop:
             return {"ok": False, "error": {"type": "tool_error", "message": "Tool execution failed"}}
 
 
+def _duration_ms(started: float) -> float:
+    return round((time.perf_counter() - started) * 1000, 3)
+
+
 class AgentService:
     def __init__(self, loop: AgentLoop) -> None:
         self.loop = loop
 
     def run(self, query: str, workspace: Workspace) -> str:
         return self.loop.run(query, workspace)
-
-
-def _assistant_tool_message(turn: AssistantTurn) -> dict[str, Any]:
-    return {
-        "role": "assistant",
-        "content": turn.content,
-        "tool_calls": [
-            {
-                "id": call.id,
-                "type": "function",
-                "function": {
-                    "name": call.name,
-                    "arguments": json.dumps(call.arguments, ensure_ascii=False),
-                },
-            }
-            for call in turn.tool_calls
-        ],
-    }
-
-
-def _tool_result_message(call: ToolCall, result: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "role": "tool",
-        "tool_call_id": call.id,
-        "content": json.dumps(result, ensure_ascii=False),
-    }

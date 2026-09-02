@@ -26,12 +26,13 @@ MVP 的目标不是实现通用自主编程，而是验证一条稳定、可观�
 - 支持原生 tool calling
 - 提供 `listfiles` 和 `readfile` 两个只读工具
 - 严格限制工具只能访问仓库目录内的内容
-- 最多执行 4 轮工具调用
+- 最多执行 10 轮工具调用
+- 每个工具默认最多调用 3 次，超限时返回结构化错误
 - 返回清晰的仓库结构、脚本用途和验证结果解释
 - 使用固定测试夹具验证主链路
 - 每次提问创建独立 run，并将关键步骤持久化到 `trace.json`
-- 提供可选的 `--debug` trace，记录脱敏后的完整消息流
-- 在 trace 中记录模块调用 span，支持还原运行时调用方向
+- 每次 run 同时生成简洁的 `trace.json` 和详细的 `report.json`
+- 在模型响应和工具结果事件中记录各自耗时
 - 为模型请求提供默认 60 秒超时，并允许 CLI/环境变量覆盖
 - 为 run 和各模块调用记录开始时间、结束时间与耗时
 
@@ -61,7 +62,7 @@ Agent 应该能够：
 2. 向模型提供初始文件清单
 3. 根据模型的 tool call 调用 `listfiles` 或 `readfile`
 4. 将工具结果回传模型
-5. 在 4 轮内输出基于实际文件内容的解释
+5. 在 10 轮内输出基于实际文件内容的解释
 
 ### 验收标准
 
@@ -69,7 +70,7 @@ Agent 应该能够：
 - 请求仓库外路径时，工具调用被拒绝且不会读取文件
 - 文件不存在、不可读或超过大小限制时，模型收到结构化错误
 - 模型没有新的 tool call 时，Agent 正常结束并输出最终文本
-- 达到 4 轮工具调用时，Agent 停止并明确说明原因
+- 达到 10 轮工具调用时，Agent 停止并明确说明原因
 - 在 `tests/fixtures/sample-repo` 上可以完成一次端到端测试
 - 每次 CLI 提问都会生成唯一 run ID 和对应的 `trace.json`
 - LLM 请求、工具调用、工具结果、错误和最终回答会按顺序写入 trace
@@ -91,7 +92,7 @@ coding-agent "<query>" [--repo <path>]
 - 默认输出最终解释
 - 工具调用失败和循环终止原因输出到标准错误
 - 成功或失败时输出 run ID 和 trace 文件路径
-- `--debug`：可选地将完整 LLM 消息、工具定义和规范化模型响应写入 trace；默认关闭
+- 每次运行自动生成详细 report，不再提供 debug 开关
 - `--timeout`：模型请求超时秒数，默认 `60`
 
 ## 5. 方案 A 架构
@@ -100,7 +101,7 @@ coding-agent "<query>" [--repo <path>]
 CLI
 └── AgentService
     ├── RepositoryResolver
-    ├── ContextBuilder
+    ├── ConversationContext
     ├── AgentLoop
     │   ├── LLMClient
     │   └── ToolRegistry
@@ -120,13 +121,22 @@ CLI
 
 从当前目录或 `--repo` 起始目录向上查找 Git 根目录。找不到 Git 根目录时直接报错退出。
 
-#### ContextBuilder
+#### ConversationContext
 
-在第一次 LLM 请求前生成仓库上下文前缀，包含仓库根目录和受限文件清单。它与 `listfiles` 共用扫描和路径校验逻辑。
+负责构造和维护发送给 LLM 的上下文。上下文分为不变的 system messages（Agent 规则和一次 run 开始时生成的仓库稳定上下文）以及可变的 history（用户请求、assistant tool call、tool result）。每轮向 LLM 提供 system messages 加完整 history；仓库上下文只在任务开始时生成一次。
+
+仓库稳定上下文包括：
+
+- 仓库根目录下的文件清单
+- 根目录下存在的 `README.md`、`pyproject.toml`、`package.json`、`AGENTS.md` 和 `.env.example` 内容
+- 扫描到的常见入口文件（如 `main.py`、`app.py`、`run.py`、`cli.py`、`__main__.py`）内容
+- `git status --short` 的启动时快照
+
+重要文件单个最多读取 12KB；超过限制时只保留前 12KB 并附带截断标记。文件不存在、不可读或 Git 状态获取失败时，写入简短状态说明，不阻断整个 run。重要文件内容和 Git 状态均按普通 system message 注入，不作为工具调用结果追加到 history。
 
 #### AgentLoop
 
-维护消息历史，向 LLM 请求下一步动作，分发工具调用，追加工具结果，直到模型返回最终文本或达到 4 轮上限。
+维护 Agent 循环和工具分发；通过 `ConversationContext` 获取消息，不直接拼接 system、user、assistant 和 tool 字典。
 
 #### LLMClient
 
@@ -142,24 +152,29 @@ CLI
 
 #### RunRecorder
 
-为每次用户 query 创建唯一 run 目录和 `trace.json`，按事件顺序记录任务输入、模型轮次、工具调用、工具结果、错误和最终回答。每个关键事件写入后立即持久化，确保失败任务也能复盘。Recorder 同时提供轻量 span，用 `span_id` 和 `parent_span_id` 表示 CLI、AgentLoop、LLMClient、ToolRegistry、具体工具和 Workspace 之间的运行时调用关系。
+为每次用户 query 创建唯一 run 目录和 `trace.json`、`report.json`。trace 按事件顺序保存简洁摘要；report 保存每轮完整消息、工具定义、规范化模型响应、工具参数和工具结果。每个关键事件写入后立即持久化，确保失败任务也能复盘。模型响应、工具结果和 run 顶层记录耗时。
 
 ## 6. 消息与数据流
 
+`ConversationContext` 管理三类数据：
+
+- `system_messages`：Agent 规则、仓库文件清单、重要项目文件内容和 Git 状态快照，任务内不变
+- `history`：用户请求、assistant tool call、tool result，按发生顺序追加
+- `current_request`：开始任务时加入 history 的本次用户 query
+
 首次请求的消息顺序：
 
-1. `system/developer`：Agent 规则、工具使用规则和工作空间边界
-2. `repository_context`：仓库根目录和初始文件清单
-3. `user`：用户 query
+1. `system_messages`（Agent 规则和仓库稳定上下文）
+2. `history` 中的 `user` query
 
 后续每轮：
 
 1. LLM 返回最终文本或一个或多个 tool call
 2. Agent 校验并执行工具
 3. Agent 追加 assistant tool call 和 tool result
-4. Agent 将完整消息历史发送给 LLM
+4. ConversationContext 将完整消息历史发送给 LLM
 
-LLM API 无状态时，客户端负责在每次请求中重新发送消息历史。仓库上下文前缀在一次任务内保持不变；只读 MVP 不需要在每轮重新扫描仓库。
+LLM API 无状态时，客户端负责在每次请求中重新发送消息历史。仓库稳定上下文前缀在一次任务内保持不变；只读 MVP 不需要在每轮重新扫描仓库或重新读取重要文件。
 
 RunRecorder 与消息历史并行工作：消息历史用于下一轮模型请求，trace 用于任务复盘；trace 不替代消息历史。
 
@@ -173,7 +188,7 @@ RunRecorder 与消息历史并行工作：消息历史用于下一轮模型请�
 .coding-agent/runs/<run-id>/trace.json
 ```
 
-目标仓库不会因为 trace 产生额外文件。未来可通过配置覆盖 runs 根目录。
+目标仓库不会因为 trace/report 产生额外文件。未来可通过配置覆盖 runs 根目录。
 
 ### Trace 结构
 
@@ -202,11 +217,10 @@ RunRecorder 与消息历史并行工作：消息历史用于下一轮模型请�
 - 任务结束时写入 `final_answer` 或 `run_failed`，并更新 `status`
 - 写入采用临时文件替换，避免进程中断留下半截 JSON
 - trace 不包含 API Key；工具结果和消息内容按配置的敏感信息规则处理
-- 普通模式仅保存消息数量、工具数量等摘要；`--debug` 才保存完整消息和工具定义
-- span 事件至少包含 `span_id`、`parent_span_id`、`component`、`operation`、`status` 和耗时信息
-- 事件使用 UTC 时间戳；span 结束事件记录 `started_at`、`ended_at` 和 `duration_ms`
+- `trace.json` 仅保存消息数量、工具数量等摘要；`report.json` 固定保存完整消息和工具定义
+- 模型响应、工具结果和 run 顶层记录 `duration_ms`；不记录步骤开始时间和结束时间
 - 模型超时记录为稳定的 `timeout` 错误类型
-- debug 内容沿用递归脱敏规则，且不记录完整 OpenAI SDK 对象
+- report 内容沿用递归脱敏规则，且不记录完整 OpenAI SDK 对象
 
 ## 8. 工具契约
 
@@ -252,10 +266,11 @@ RunRecorder 与消息历史并行工作：消息历史用于下一轮模型请�
 
 ## 9. Agent Loop 规则
 
-- 单个任务最多 4 轮工具调用
+- 单个任务最多 10 轮工具调用
 - 模型返回无 tool call 的普通文本时结束
 - 达到上限时停止并返回明确的终止说明
 - 工具错误作为结构化 tool result 回传，由模型决定重试、换路径或结束
+- 单个工具达到调用上限时不再执行该工具，将 `tool_call_limit` 错误回传模型
 - 模型请求设置超时；超时和网络错误由 Agent 转换为用户可读错误
 - MVP 不自动重试模型请求，避免重复工具调用；重试策略留待后续版本
 
@@ -299,10 +314,12 @@ sample-repo/
 - `readfile` 的正常读取、文件不存在和大小超限
 - 路径穿越和符号链接逃逸被拒绝
 - 原生 tool call 到工具结果再到最终回答的循环
-- 4 轮上限和模型请求错误
-- debug trace 包含完整请求、工具调用和规范化模型响应
-- span 的父子关系和开始/结束状态可以还原实际调用方向
-- 超时配置和每个 span 的耗时可以在 trace 中复盘
+- 10 轮上限和模型请求错误
+- 稳定仓库上下文包含文件清单、重要项目文件内容和 `git status --short`
+- 重要文件包括根目录下的 `README.md`、`pyproject.toml`、`package.json`、`AGENTS.md`、`.env.example`，以及扫描到的常见入口文件（如 `main.py`、`app.py`、`run.py`、`cli.py`、`__main__.py`）
+- 重要文件缺失、不可读和超过 12KB 时不会阻断 run，并生成明确的状态说明
+- report 包含完整请求、工具调用和规范化模型响应，trace 只保留摘要
+- 超时配置和每个模型/工具步骤的耗时可以在 trace 中复盘
 
 ## 13. 后续演进
 

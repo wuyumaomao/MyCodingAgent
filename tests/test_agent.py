@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from coding_agent.agent import AgentLoop
+from coding_agent.agent import AgentLimits, AgentLoop
 from coding_agent.context import build_repository_context
 from coding_agent.llm import InvalidToolArguments
 from coding_agent.models import AssistantTurn, ToolCall
@@ -64,6 +64,20 @@ def test_loop_stops_after_four_tool_rounds(sample_git_repo):
     assert llm.calls == 4
 
 
+def test_loop_defaults_to_ten_tool_rounds(sample_git_repo):
+    llm = FakeLLM(
+        [
+            AssistantTurn(None, [ToolCall(f"call-{n}", "listfiles", {})])
+            for n in range(10)
+        ]
+    )
+    answer = AgentLoop(llm, make_registry(sample_git_repo)).run(
+        "Inspect", Workspace(sample_git_repo)
+    )
+    assert "10" in answer
+    assert llm.calls == 10
+
+
 def test_loop_returns_tool_error_to_model(sample_git_repo):
     llm = FakeLLM(
         [
@@ -100,11 +114,11 @@ def test_agent_loop_records_model_and_tool_events(sample_git_repo, tmp_path):
     assert "tool_call" in event_types
     assert "tool_result" in event_types
     assert "final_answer" in event_types
-    assert event_types[-1] == "span_end"
+    assert event_types[-1] == "final_answer"
 
 
-def test_agent_debug_trace_contains_message_history_and_tool_decision(sample_git_repo, tmp_path):
-    recorder = RunRecorder.create("read", sample_git_repo, tmp_path / "runs", debug=True)
+def test_agent_report_contains_full_messages_without_debug_flag(sample_git_repo, tmp_path):
+    recorder = RunRecorder.create("read", sample_git_repo, tmp_path / "runs")
     llm = FakeLLM(
         [
             AssistantTurn(None, [ToolCall("c1", "readfile", {"path": "README.md"})]),
@@ -114,12 +128,27 @@ def test_agent_debug_trace_contains_message_history_and_tool_decision(sample_git
     AgentLoop(llm, make_registry(sample_git_repo), recorder=recorder).run(
         "read", Workspace(sample_git_repo)
     )
-    events = json.loads(recorder.trace_path.read_text(encoding="utf-8"))["events"]
+    events = json.loads(recorder.report_path.read_text(encoding="utf-8"))["events"]
     requests = [event for event in events if event["type"] == "llm_request"]
     responses = [event for event in events if event["type"] == "llm_response"]
     assert requests[0]["messages"][-1]["content"] == "read"
     assert responses[0]["tool_calls"][0]["name"] == "readfile"
-    assert any(
-        event["type"] == "span_start" and event["component"] == "AgentLoop"
-        for event in events
+    responses = [event for event in events if event["type"] == "llm_response"]
+    assert "duration_ms" in responses[0]
+    assert all(event["type"] not in {"span_start", "span_end"} for event in events)
+
+
+def test_loop_rejects_tool_after_per_tool_limit(sample_git_repo):
+    llm = FakeLLM(
+        [
+            AssistantTurn(None, [ToolCall(f"c{i}", "readfile", {"path": "README.md"})])
+            for i in range(4)
+        ] + [AssistantTurn("done", [])]
     )
+    AgentLoop(
+        llm,
+        make_registry(sample_git_repo),
+        limits=AgentLimits(max_rounds=5, max_calls_per_tool=3),
+    ).run("read", Workspace(sample_git_repo))
+    assert llm.messages[-1][-1]["role"] == "tool"
+    assert "tool_call_limit" in llm.messages[-1][-1]["content"]
