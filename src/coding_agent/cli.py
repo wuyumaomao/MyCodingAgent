@@ -24,6 +24,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--repo", type=Path, default=Path.cwd())
     parser.add_argument("--model")
     parser.add_argument("--base-url")
+    parser.add_argument("--debug", action="store_true", help="Persist detailed message trace")
+    parser.add_argument("--timeout", type=float)
     return parser
 
 
@@ -36,7 +38,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         repository = resolve_repository(args.repo)
         workspace = Workspace(repository)
-        recorder = RunRecorder.create(" ".join(args.query), repository, RUNS_ROOT)
+        recorder = RunRecorder.create(
+            " ".join(args.query), repository, RUNS_ROOT, debug=args.debug
+        )
         settings = Settings.from_args_and_env(args)
         registry = ToolRegistry()
         listfiles = ListFilesTool(workspace)
@@ -57,10 +61,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             api_key=settings.api_key,
             model=settings.model,
             base_url=settings.base_url,
+            timeout=settings.timeout,
         )
+        #cli装配好llm，tool-registry，encoder，contextbuilder给agentloop。run的时候传入query和workspace
         service = AgentService(AgentLoop(llm_client, registry, recorder=recorder))
         answer = service.run(" ".join(args.query), workspace)
-    except Exception as exc:
+    except Exception as exc:#抛出了异常，记录是哪里出错了
         if recorder is not None and recorder.status == "running":
             error_type = _error_type(exc)
             recorder.fail(error_type, _safe_error_message(exc))

@@ -55,6 +55,14 @@ coding-agent "package.json 里有哪些可用命令" --repo .
 
 trace 会记录模型请求、工具调用、工具结果、错误和最终回答，且不会写入目标仓库或保存 API Key。
 
+需要复盘真实消息流和模块调用方向时，可开启 debug trace：
+
+```bash
+coding-agent "解释这个仓库的启动和测试脚本" --repo . --debug
+```
+
+debug trace 会在同一个 `trace.json` 中附加脱敏后的完整 LLM 消息、工具定义、规范化模型响应以及 span 调用层级。debug 默认关闭；如果读取的文件包含密钥等敏感文本，这些内容仍可能出现在工具结果中，请谨慎使用。
+
 ## 开发约定
 
 - 先明确目标和边界，再开始实现

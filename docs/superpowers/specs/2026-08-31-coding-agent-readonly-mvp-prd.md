@@ -30,6 +30,10 @@ MVP 的目标不是实现通用自主编程，而是验证一条稳定、可观�
 - 返回清晰的仓库结构、脚本用途和验证结果解释
 - 使用固定测试夹具验证主链路
 - 每次提问创建独立 run，并将关键步骤持久化到 `trace.json`
+- 提供可选的 `--debug` trace，记录脱敏后的完整消息流
+- 在 trace 中记录模块调用 span，支持还原运行时调用方向
+- 为模型请求提供默认 60 秒超时，并允许 CLI/环境变量覆盖
+- 为 run 和各模块调用记录开始时间、结束时间与耗时
 
 ### 不在 MVP 范围内
 
@@ -87,7 +91,8 @@ coding-agent "<query>" [--repo <path>]
 - 默认输出最终解释
 - 工具调用失败和循环终止原因输出到标准错误
 - 成功或失败时输出 run ID 和 trace 文件路径
-- 预留 `--verbose`，用于显示工具调用过程；MVP 可先不实现
+- `--debug`：可选地将完整 LLM 消息、工具定义和规范化模型响应写入 trace；默认关闭
+- `--timeout`：模型请求超时秒数，默认 `60`
 
 ## 5. 方案 A 架构
 
@@ -137,7 +142,7 @@ CLI
 
 #### RunRecorder
 
-为每次用户 query 创建唯一 run 目录和 `trace.json`，按事件顺序记录任务输入、模型轮次、工具调用、工具结果、错误和最终回答。每个关键事件写入后立即持久化，确保失败任务也能复盘。
+为每次用户 query 创建唯一 run 目录和 `trace.json`，按事件顺序记录任务输入、模型轮次、工具调用、工具结果、错误和最终回答。每个关键事件写入后立即持久化，确保失败任务也能复盘。Recorder 同时提供轻量 span，用 `span_id` 和 `parent_span_id` 表示 CLI、AgentLoop、LLMClient、ToolRegistry、具体工具和 Workspace 之间的运行时调用关系。
 
 ## 6. 消息与数据流
 
@@ -197,6 +202,11 @@ RunRecorder 与消息历史并行工作：消息历史用于下一轮模型请�
 - 任务结束时写入 `final_answer` 或 `run_failed`，并更新 `status`
 - 写入采用临时文件替换，避免进程中断留下半截 JSON
 - trace 不包含 API Key；工具结果和消息内容按配置的敏感信息规则处理
+- 普通模式仅保存消息数量、工具数量等摘要；`--debug` 才保存完整消息和工具定义
+- span 事件至少包含 `span_id`、`parent_span_id`、`component`、`operation`、`status` 和耗时信息
+- 事件使用 UTC 时间戳；span 结束事件记录 `started_at`、`ended_at` 和 `duration_ms`
+- 模型超时记录为稳定的 `timeout` 错误类型
+- debug 内容沿用递归脱敏规则，且不记录完整 OpenAI SDK 对象
 
 ## 8. 工具契约
 
@@ -256,6 +266,7 @@ RunRecorder 与消息历史并行工作：消息历史用于下一轮模型请�
 - `CODING_AGENT_API_KEY`
 - `CODING_AGENT_MODEL`
 - `CODING_AGENT_BASE_URL`
+- `CODING_AGENT_TIMEOUT`（默认 `60` 秒）
 
 配置优先级固定为：CLI 参数 > 环境变量 > 默认值。API Key 不提供硬编码默认值，必须来自环境变量或运行环境注入；任何情况下都不得把密钥写入仓库或日志。
 
@@ -289,6 +300,9 @@ sample-repo/
 - 路径穿越和符号链接逃逸被拒绝
 - 原生 tool call 到工具结果再到最终回答的循环
 - 4 轮上限和模型请求错误
+- debug trace 包含完整请求、工具调用和规范化模型响应
+- span 的父子关系和开始/结束状态可以还原实际调用方向
+- 超时配置和每个 span 的耗时可以在 trace 中复盘
 
 ## 13. 后续演进
 

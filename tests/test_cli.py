@@ -51,6 +51,25 @@ def test_settings_load_dotenv_file(monkeypatch, tmp_path):
     assert settings.base_url == "https://file.example/v1"
 
 
+def test_settings_parse_timeout(monkeypatch):
+    monkeypatch.setenv("CODING_AGENT_API_KEY", "env-key")
+    monkeypatch.setenv("CODING_AGENT_MODEL", "env-model")
+    monkeypatch.setenv("CODING_AGENT_TIMEOUT", "12.5")
+    settings = Settings.from_args_and_env(
+        Namespace(api_key=None, model=None, base_url=None, timeout=None)
+    )
+    assert settings.timeout == 12.5
+
+
+def test_settings_reject_non_positive_timeout(monkeypatch):
+    monkeypatch.setenv("CODING_AGENT_API_KEY", "env-key")
+    monkeypatch.setenv("CODING_AGENT_MODEL", "env-model")
+    with __import__("pytest").raises(ValueError, match="positive"):
+        Settings.from_args_and_env(
+            Namespace(api_key=None, model=None, base_url=None, timeout=0)
+        )
+
+
 def test_cli_uses_repo_argument_and_renders_answer(monkeypatch, sample_git_repo, capsys):
     monkeypatch.setenv("CODING_AGENT_API_KEY", "test-key")
     monkeypatch.setenv("CODING_AGENT_MODEL", "test-model")
@@ -118,3 +137,33 @@ def test_cli_runs_from_nested_directory_with_fake_provider(monkeypatch, sample_g
     assert main(["Explain scripts", "--repo", str(sample_git_repo / "src")]) == 0
     assert "npm scripts" in capsys.readouterr().out
     assert any(message[1]["content"].startswith("[Repository Context]") for message in client.messages)
+
+
+def test_cli_debug_flag_persists_full_llm_request(monkeypatch, sample_git_repo, tmp_path):
+    monkeypatch.setenv("CODING_AGENT_API_KEY", "test-key")
+    monkeypatch.setenv("CODING_AGENT_MODEL", "test-model")
+    monkeypatch.setattr("coding_agent.cli.RUNS_ROOT", tmp_path / "runs")
+    monkeypatch.setattr(
+        "coding_agent.cli.LLMClient",
+        lambda **kwargs: FakeClient([AssistantTurn("ok", [])]),
+    )
+    assert main(["Explain", "--debug", "--repo", str(sample_git_repo)]) == 0
+    trace = next((tmp_path / "runs").glob("*/trace.json"))
+    document = json.loads(trace.read_text(encoding="utf-8"))
+    request = next(event for event in document["events"] if event["type"] == "llm_request")
+    assert "messages" in request
+
+
+def test_cli_passes_timeout_to_llm_client(monkeypatch, sample_git_repo, tmp_path):
+    monkeypatch.setenv("CODING_AGENT_API_KEY", "test-key")
+    monkeypatch.setenv("CODING_AGENT_MODEL", "test-model")
+    monkeypatch.setattr("coding_agent.cli.RUNS_ROOT", tmp_path / "runs")
+    received = {}
+
+    def make_client(**kwargs):
+        received.update(kwargs)
+        return FakeClient([AssistantTurn("ok", [])])
+
+    monkeypatch.setattr("coding_agent.cli.LLMClient", make_client)
+    assert main(["Explain", "--timeout", "12", "--repo", str(sample_git_repo)]) == 0
+    assert received["timeout"] == 12.0

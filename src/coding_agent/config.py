@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 
 
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
+DEFAULT_TIMEOUT = 60.0
 
 
 class ConfigError(ValueError):
@@ -20,6 +21,7 @@ class Settings:
     api_key: str
     model: str
     base_url: str = DEFAULT_BASE_URL
+    timeout: float = DEFAULT_TIMEOUT
 
     @classmethod
     def from_args_and_env(cls, args: Namespace) -> "Settings":
@@ -31,8 +33,19 @@ class Settings:
             or os.getenv("CODING_AGENT_BASE_URL")
             or DEFAULT_BASE_URL
         )
+        arg_timeout = getattr(args, "timeout", None)
+        timeout_value = arg_timeout if arg_timeout is not None else os.getenv("CODING_AGENT_TIMEOUT")
+        if timeout_value is None:
+            timeout = DEFAULT_TIMEOUT
+        else:
+            try:
+                timeout = float(timeout_value)
+            except (TypeError, ValueError) as exc:
+                raise ConfigError("Timeout must be a positive number") from exc
+            if timeout <= 0:
+                raise ConfigError("Timeout must be a positive number")
         if not api_key:
             raise ConfigError("API key is required (set CODING_AGENT_API_KEY)")
         if not model:
             raise ConfigError("Model is required (set CODING_AGENT_MODEL)")
-        return cls(api_key=api_key, model=model, base_url=base_url)
+        return cls(api_key=api_key, model=model, base_url=base_url, timeout=timeout)

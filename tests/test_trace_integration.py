@@ -6,6 +6,7 @@ import pytest
 
 from coding_agent.agent import AgentError, AgentLoop
 from coding_agent.context import build_repository_context
+from coding_agent.llm import LLMTimeoutError
 from coding_agent.models import AssistantTurn, ToolCall
 from coding_agent.repository import Workspace
 from coding_agent.tools.listfiles import ListFilesTool
@@ -44,11 +45,16 @@ def test_trace_event_sequence_for_success(sample_git_repo, tmp_path):
     )
     document = json.loads(recorder.trace_path.read_text(encoding="utf-8"))
     event_types = [event["type"] for event in document["events"]]
-    assert event_types == [
-        "run_started", "llm_request", "llm_response", "tool_call", "tool_result",
-        "llm_request", "llm_response", "final_answer",
-    ]
-    assert [event["seq"] for event in document["events"]] == list(range(1, 9))
+    assert event_types[0] == "run_started"
+    assert event_types.count("llm_request") == 2
+    assert event_types.count("llm_response") == 2
+    assert "tool_call" in event_types
+    assert "tool_result" in event_types
+    assert "final_answer" in event_types
+    assert event_types[-1] == "span_end"
+    assert [event["seq"] for event in document["events"]] == list(
+        range(1, len(document["events"]) + 1)
+    )
 
 
 def test_trace_records_provider_failure(sample_git_repo, tmp_path):
@@ -60,7 +66,20 @@ def test_trace_records_provider_failure(sample_git_repo, tmp_path):
         )
     document = json.loads(recorder.trace_path.read_text(encoding="utf-8"))
     assert document["status"] == "failed"
-    assert document["events"][-1]["type"] == "run_failed"
+    assert any(event["type"] == "run_failed" for event in document["events"])
+    assert document["events"][-1]["type"] == "span_end"
+
+
+def test_trace_records_timeout_as_timeout(sample_git_repo, tmp_path):
+    recorder = RunRecorder.create("Explain", sample_git_repo, tmp_path / "runs")
+    llm = FakeLLM([LLMTimeoutError("timed out")])
+    with pytest.raises(AgentError):
+        AgentLoop(llm, make_registry(sample_git_repo), recorder=recorder).run(
+            "Explain", Workspace(sample_git_repo)
+        )
+    document = json.loads(recorder.trace_path.read_text(encoding="utf-8"))
+    failures = [event for event in document["events"] if event["type"] == "run_failed"]
+    assert failures[-1]["error_type"] == "timeout"
 
 
 def test_trace_redacts_secret_values(sample_git_repo, tmp_path):
@@ -82,3 +101,20 @@ def test_trace_write_failure_keeps_previous_json(sample_git_repo, tmp_path, monk
     with pytest.raises(TraceWriteError):
         recorder.record("tool_call", name="readfile")
     assert recorder.trace_path.read_text(encoding="utf-8") == previous
+
+
+def test_trace_spans_reconstruct_call_direction(sample_git_repo, tmp_path):
+    recorder = RunRecorder.create("Explain", sample_git_repo, tmp_path / "runs")
+    llm = FakeLLM([AssistantTurn("Done", [])])
+    AgentLoop(llm, make_registry(sample_git_repo), recorder=recorder).run(
+        "Explain", Workspace(sample_git_repo)
+    )
+    events = json.loads(recorder.trace_path.read_text(encoding="utf-8"))["events"]
+    starts = {event["span_id"]: event for event in events if event["type"] == "span_start"}
+    ends = {event["span_id"]: event for event in events if event["type"] == "span_end"}
+    assert set(starts) == set(ends)
+    agent = next(event for event in starts.values() if event["component"] == "AgentLoop")
+    llm_span = next(event for event in starts.values() if event["component"] == "LLMClient")
+    assert agent["parent_span_id"] is None
+    assert llm_span["parent_span_id"] == agent["span_id"]
+    assert ends[llm_span["span_id"]]["status"] == "ok"

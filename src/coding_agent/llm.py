@@ -3,13 +3,17 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from openai import OpenAI
+from openai import APITimeoutError, OpenAI
 
 from .models import AssistantTurn, ToolCall
 
 
 class InvalidToolArguments(ValueError):
     """Raised when a provider returns malformed tool arguments."""
+
+
+class LLMTimeoutError(TimeoutError):
+    """Raised when the model provider exceeds the configured timeout."""
 
 
 class LLMClient:
@@ -19,7 +23,7 @@ class LLMClient:
         api_key: str,
         model: str,
         base_url: str | None = None,
-        timeout: float = 30.0,
+        timeout: float = 60.0,
     ) -> None:
         self.model = model
         kwargs: dict[str, Any] = {"api_key": api_key, "timeout": timeout}
@@ -32,11 +36,14 @@ class LLMClient:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
     ) -> Any:
-        return self._client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            tools=tools,
-        )
+        try:
+            return self._client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                tools=tools,
+            )
+        except APITimeoutError as exc:
+            raise LLMTimeoutError("The model request timed out") from exc
 
     def complete(
         self,
@@ -55,7 +62,7 @@ class LLMClient:
                     raise InvalidToolArguments("Tool arguments are not valid JSON") from exc
             if not isinstance(arguments, dict):
                 raise InvalidToolArguments("Tool arguments must be a JSON object")
-            tool_calls.append(
+            tool_calls.append(#把模型返回组装成toolcall
                 ToolCall(
                     id=str(call.id),
                     name=str(call.function.name),

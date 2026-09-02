@@ -41,7 +41,7 @@ class Workspace:
             raise RepositoryError("Repository root is not a directory")
         object.__setattr__(self, "root", root)
 
-    def resolve_relative(self, path: str) -> Path:
+    def resolve_relative(self, path: str) -> Path:#路径拼接后不能逃逸
         if not isinstance(path, str) or not path:
             raise WorkspaceViolation("Path must be a non-empty relative path")
         candidate_path = Path(path)

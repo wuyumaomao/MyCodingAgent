@@ -99,4 +99,27 @@ def test_agent_loop_records_model_and_tool_events(sample_git_repo, tmp_path):
     assert "llm_response" in event_types
     assert "tool_call" in event_types
     assert "tool_result" in event_types
-    assert event_types[-1] == "final_answer"
+    assert "final_answer" in event_types
+    assert event_types[-1] == "span_end"
+
+
+def test_agent_debug_trace_contains_message_history_and_tool_decision(sample_git_repo, tmp_path):
+    recorder = RunRecorder.create("read", sample_git_repo, tmp_path / "runs", debug=True)
+    llm = FakeLLM(
+        [
+            AssistantTurn(None, [ToolCall("c1", "readfile", {"path": "README.md"})]),
+            AssistantTurn("done", []),
+        ]
+    )
+    AgentLoop(llm, make_registry(sample_git_repo), recorder=recorder).run(
+        "read", Workspace(sample_git_repo)
+    )
+    events = json.loads(recorder.trace_path.read_text(encoding="utf-8"))["events"]
+    requests = [event for event in events if event["type"] == "llm_request"]
+    responses = [event for event in events if event["type"] == "llm_response"]
+    assert requests[0]["messages"][-1]["content"] == "read"
+    assert responses[0]["tool_calls"][0]["name"] == "readfile"
+    assert any(
+        event["type"] == "span_start" and event["component"] == "AgentLoop"
+        for event in events
+    )

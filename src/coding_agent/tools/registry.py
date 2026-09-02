@@ -9,7 +9,7 @@ class ToolRegistry:
         self._tools: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {}
         self._definitions: dict[str, dict[str, Any]] = {}
 
-    def register(
+    def register(#注册器需要工具名，执行函数，参数，描述
         self,
         name: str,
         executor: Callable[[dict[str, Any]], dict[str, Any]],
