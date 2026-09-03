@@ -2,7 +2,8 @@
 
 ## 文档状态
 
-- 状态：待评审
+- 状态：待评审（已补充统一工具 JSON Schema 校验）
+- 最近修订：2026-09-03，增加模型工具参数的统一 Schema 校验层
 - 方案：A，单进程分层架构
 - 范围：面向本地 Git 仓库的只读 Coding Agent
 
@@ -25,6 +26,7 @@ MVP 的目标不是实现通用自主编程，而是验证一条稳定、可观�
 - 在首次模型请求前生成仓库上下文前缀
 - 支持原生 tool calling
 - 提供 `listfiles` 和 `readfile` 两个只读工具
+- 为每个工具注册参数 JSON Schema，并在执行前统一校验模型参数
 - 严格限制工具只能访问仓库目录内的内容
 - 最多执行 10 轮工具调用
 - 每个工具默认最多调用 3 次，超限时返回结构化错误
@@ -69,6 +71,7 @@ Agent 应该能够：
 - 在 Git 仓库根目录或任意子目录启动，结果使用同一个仓库根目录
 - 请求仓库外路径时，工具调用被拒绝且不会读取文件
 - 文件不存在、不可读或超过大小限制时，模型收到结构化错误
+- 模型返回结构合法但不符合工具 Schema 的参数时，不执行工具，并将稳定的参数错误作为 tool result 回传模型
 - 模型没有新的 tool call 时，Agent 正常结束并输出最终文本
 - 达到 10 轮工具调用时，Agent 停止并明确说明原因
 - 在 `tests/fixtures/sample-repo` 上可以完成一次端到端测试
@@ -105,6 +108,7 @@ CLI
     ├── AgentLoop
     │   ├── LLMClient
     │   └── ToolRegistry
+    │       ├── ToolSchemaValidator
     │       ├── listfiles
     │       └── readfile
     ├── RunRecorder
@@ -144,7 +148,11 @@ CLI
 
 #### ToolRegistry
 
-注册工具定义，校验模型传入的参数，执行工具并将结果转换为统一的工具消息。
+注册工具定义及其参数 JSON Schema，并提供按工具名称查询和校验参数的接口。Schema 校验通过后才执行具体工具；工具自身仍负责路径边界、文件存在性、权限和其他运行时安全检查。Schema 校验失败时返回稳定的 `invalid_tool_arguments` 结果，不执行工具。
+
+#### ToolSchemaValidator
+
+使用 `jsonschema` 对工具注册时的参数 Schema 执行 Draft 2020-12 兼容校验。它只负责工具协议层的结构和声明级约束，不读取文件、不访问仓库状态，也不替代工具实现中的业务和安全校验。
 
 #### OutputRenderer
 
@@ -170,9 +178,11 @@ CLI
 后续每轮：
 
 1. LLM 返回最终文本或一个或多个 tool call
-2. Agent 校验并执行工具
-3. Agent 追加 assistant tool call 和 tool result
-4. ConversationContext 将完整消息历史发送给 LLM
+2. Agent 确认工具已注册，并使用该工具的 JSON Schema 校验 arguments
+3. Schema 校验通过后，Agent 调用工具；工具继续执行自身的业务和安全校验
+4. Schema 或工具校验失败时，Agent 不执行危险操作，追加结构化 tool result
+5. Agent 追加 assistant tool call 和 tool result
+6. ConversationContext 将完整消息历史发送给 LLM
 
 LLM API 无状态时，客户端负责在每次请求中重新发送消息历史。仓库稳定上下文前缀在一次任务内保持不变；只读 MVP 不需要在每轮重新扫描仓库或重新读取重要文件。
 
@@ -224,6 +234,49 @@ RunRecorder 与消息历史并行工作：消息历史用于下一轮模型请�
 
 ## 8. 工具契约
 
+### 8.1 统一参数 Schema 校验
+
+每个注册工具必须提供一个顶层 `type: object` 的 JSON Schema。Schema 至少声明工具参数的属性、类型、必填字段和额外字段策略；可按工具需要声明 `minimum`、`maximum`、`minLength`、`enum` 等约束。
+
+Schema 校验发生在 `ResponseParser` 将 provider 响应转换为内部 `ToolCall` 之后、工具实现执行之前。校验顺序固定为：
+
+```text
+解析响应 → 查找工具 → 校验 JSON Schema → 工具业务/安全校验 → 执行工具
+```
+
+Schema 校验覆盖：
+
+- arguments 顶层类型和字段结构
+- required 字段
+- 字段类型、数值范围、字符串长度和枚举值
+- `additionalProperties` 规则
+
+Schema 校验不覆盖：
+
+- 文件是否存在或可读取
+- 路径是否逃逸仓库
+- 符号链接是否指向仓库外部
+- 文件内容编码和大小
+- 需要访问运行时状态才能判断的业务语义
+
+上述内容必须继续由具体工具和 `Workspace` 执行安全检查。
+
+当 arguments 是合法 JSON object 但不符合工具 Schema 时，返回：
+
+```json
+{
+  "ok": false,
+  "error": {
+    "type": "invalid_tool_arguments",
+    "message": "Tool arguments do not match the registered schema"
+  }
+}
+```
+
+该结果作为 `role: tool` 消息回传模型，允许模型修正参数；工具实现不得在 Schema 校验失败时被调用。未知工具仍返回 `unknown_tool`，不尝试执行或推断 Schema。
+
+Provider 侧的 `strict` tool schema（如果 provider 支持）只能作为额外约束，不能替代客户端 Schema 校验和工具安全检查。
+
 ### `listfiles`
 
 用途：列出仓库内指定目录的文件和子目录。
@@ -270,6 +323,7 @@ RunRecorder 与消息历史并行工作：消息历史用于下一轮模型请�
 - 模型返回无 tool call 的普通文本时结束
 - 达到上限时停止并返回明确的终止说明
 - 工具错误作为结构化 tool result 回传，由模型决定重试、换路径或结束
+- 工具调用必须先通过注册 Schema 校验；Schema 不匹配时返回 `invalid_tool_arguments`，不执行工具
 - 单个工具达到调用上限时不再执行该工具，将 `tool_call_limit` 错误回传模型
 - 模型请求设置超时；超时和网络错误由 Agent 转换为用户可读错误
 - MVP 不自动重试模型请求，避免重复工具调用；重试策略留待后续版本
@@ -288,6 +342,7 @@ RunRecorder 与消息历史并行工作：消息历史用于下一轮模型请�
 ## 11. 安全与错误处理
 
 - 所有工具调用在执行前进行路径规范化和仓库边界校验
+- 所有工具调用在工具执行前进行统一 JSON Schema 校验
 - 工具层按解析后的真实路径执行边界校验，允许仓库内绝对路径
 - 不访问仓库外文件、环境变量内容或用户主目录
 - 错误结果包含稳定的错误类型和简短消息，不包含敏感路径细节
@@ -314,6 +369,9 @@ sample-repo/
 - `readfile` 的正常读取、文件不存在和大小超限
 - 路径穿越和符号链接逃逸被拒绝
 - 原生 tool call 到工具结果再到最终回答的循环
+- 工具 Schema 校验通过、缺少必填字段、类型错误、数值越界和额外字段时的行为
+- Schema 校验失败时工具实现不会被调用，并将 `invalid_tool_arguments` 作为 tool result 回传
+- 未知工具名返回 `unknown_tool`，不会执行任何工具
 - 10 轮上限和模型请求错误
 - 稳定仓库上下文包含文件清单、重要项目文件内容和 `git status --short`
 - 重要文件包括根目录下的 `README.md`、`pyproject.toml`、`package.json`、`AGENTS.md`、`.env.example`，以及扫描到的常见入口文件（如 `main.py`、`app.py`、`run.py`、`cli.py`、`__main__.py`）
