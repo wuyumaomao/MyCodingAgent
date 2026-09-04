@@ -6,6 +6,13 @@ from coding_agent.repository import Workspace
 from coding_agent.tools.readfile import ReadFileTool
 
 
+def test_readfile_schema_declares_object_and_required_path():
+    schema = ReadFileTool.parameters
+    assert schema["type"] == "object"
+    assert schema["required"] == ["path"]
+    assert schema["additionalProperties"] is False
+
+
 def test_readfile_returns_utf8_text(sample_git_repo):
     result = ReadFileTool(Workspace(sample_git_repo)).execute({"path": "README.md"})
     assert result["ok"] is True

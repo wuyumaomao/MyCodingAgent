@@ -5,6 +5,14 @@ from coding_agent.repository import Workspace
 from coding_agent.tools.listfiles import ListFilesTool
 
 
+def test_listfiles_schema_declares_object_and_numeric_bounds():
+    schema = ListFilesTool.parameters
+    assert schema["type"] == "object"
+    assert schema["additionalProperties"] is False
+    assert schema["properties"]["max_depth"]["minimum"] == 0
+    assert schema["properties"]["max_entries"]["minimum"] == 1
+
+
 def test_listfiles_honors_ignore_and_depth(sample_git_repo):
     entries, truncated = scan_files(Workspace(sample_git_repo), max_depth=1)
     paths = {entry.path for entry in entries}

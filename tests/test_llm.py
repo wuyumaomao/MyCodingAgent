@@ -6,6 +6,8 @@ import pytest
 
 from coding_agent.llm import LLMClient, LLMResponseError
 from coding_agent.response_parser import ResponseParser
+from coding_agent.tools.listfiles import ListFilesTool
+from coding_agent.tools.readfile import ReadFileTool
 
 
 def fake_provider_response():
@@ -110,3 +112,10 @@ def test_response_parser_rejects_inconsistent_tool_call_reason():
 
     with pytest.raises(LLMResponseError):
         ResponseParser().parse(response)
+
+
+def test_builtin_tool_schemas_are_valid_registry_definitions():
+    from coding_agent.tools.schema import ToolSchemaValidator
+
+    ToolSchemaValidator.validate_definition(ReadFileTool.parameters)
+    ToolSchemaValidator.validate_definition(ListFilesTool.parameters)

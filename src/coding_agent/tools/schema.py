@@ -26,7 +26,10 @@ class ToolSchemaValidator:
     def validate_arguments(schema: dict[str, Any], arguments: Any) -> None:
         ToolSchemaValidator.validate_definition(schema)
         validator = Draft202012Validator(schema)
-        errors = sorted(validator.iter_errors(arguments), key=lambda error: list(error.absolute_path))
+        errors = sorted(
+            validator.iter_errors(arguments),
+            key=lambda error: tuple(str(part) for part in error.absolute_path),
+        )
         if errors:
             raise ToolSchemaError("Tool arguments do not match the registered schema")
 
