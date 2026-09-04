@@ -43,7 +43,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.repo,
             settings,
             approval_ask=_ask_write_approval if sys.stdin.isatty() else None,
-            approval_record=recorder.record,
             limits=AgentLimits(max_calls_per_tool=args.max_tool_calls),
             llm_client_factory=LLMClient,
         )

@@ -1,11 +1,28 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextvars import ContextVar
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
-from typing import Literal
+from typing import Iterator, Literal
 
 
 ApprovalDecision = Literal["approved", "denied", "required"]
+
+
+_current_event_sink: ContextVar[object | None] = ContextVar(
+    "coding_agent_current_event_sink", default=None
+)
+
+
+@contextmanager
+def event_sink_context(sink: object) -> Iterator[None]:
+    """Bind the current run's event sink while a tool executes."""
+    token = _current_event_sink.set(sink)
+    try:
+        yield
+    finally:
+        _current_event_sink.reset(token)
 
 
 @dataclass(frozen=True)
@@ -35,14 +52,13 @@ class WriteApprovalGate:
         self._record = record
 
     def approve(self, preview: WritePreview) -> ApprovalDecision:
-        if self._record is not None:
-            self._record(
-                "approval_request",
-                operation=preview.operation,
-                path=preview.path,
-                existed=preview.existed,
-                report_payload={"preview": preview.as_dict()},
-            )
+        self._emit(
+            "approval_request",
+            operation=preview.operation,
+            path=preview.path,
+            existed=preview.existed,
+            report_payload={"preview": preview.as_dict()},
+        )
         if self._ask is None:
             decision: ApprovalDecision = "required"
         else:
@@ -50,11 +66,18 @@ class WriteApprovalGate:
                 decision = "approved" if self._ask(preview) else "denied"
             except Exception:
                 decision = "required"
-        if self._record is not None:
-            self._record(
-                "approval_result",
-                operation=preview.operation,
-                path=preview.path,
-                decision=decision,
-            )
+        self._emit(
+            "approval_result",
+            operation=preview.operation,
+            path=preview.path,
+            decision=decision,
+        )
         return decision
+
+    def _emit(self, event_type: str, **payload: object) -> None:
+        sink = _current_event_sink.get()
+        if sink is not None:
+            sink.emit(event_type, **payload)  # type: ignore[attr-defined]
+            return
+        if self._record is not None:
+            self._record(event_type, **payload)

@@ -8,6 +8,7 @@ from .events import EventSink
 from .models import ToolCall
 from .tools.registry import ToolRegistry
 from .tools.schema import ToolSchemaError
+from .tools.approval import event_sink_context
 
 
 @dataclass(frozen=True)
@@ -47,15 +48,16 @@ class ToolExecutor:
         else:
             self._tool_call_counts[call.name] = current_count + 1
             started = time.perf_counter()
-            try:
-                self.registry.validate(call.name, call.arguments)
-                result = self.registry.execute(call.name, call.arguments)
-            except KeyError:
-                result = {"ok": False, "error": {"type": "unknown_tool", "message": "Unknown tool"}}
-            except ToolSchemaError:
-                result = {"ok": False, "error": {"type": "invalid_tool_arguments", "message": "Tool arguments do not match the registered schema"}}
-            except Exception:
-                result = {"ok": False, "error": {"type": "tool_error", "message": "Tool execution failed"}}
+            with event_sink_context(self.event_sink):
+                try:
+                    self.registry.validate(call.name, call.arguments)
+                    result = self.registry.execute(call.name, call.arguments)
+                except KeyError:
+                    result = {"ok": False, "error": {"type": "unknown_tool", "message": "Unknown tool"}}
+                except ToolSchemaError:
+                    result = {"ok": False, "error": {"type": "invalid_tool_arguments", "message": "Tool arguments do not match the registered schema"}}
+                except Exception:
+                    result = {"ok": False, "error": {"type": "tool_error", "message": "Tool execution failed"}}
             execution = ToolExecution(result, _duration_ms(started))
         self.event_sink.emit(
             "tool_result",

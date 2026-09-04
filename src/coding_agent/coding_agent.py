@@ -58,12 +58,15 @@ class CodingAgent:
                 description=tool.description,
             )
         client_factory = llm_client_factory or LLMClient
-        client = llm_client or client_factory(
-            api_key=settings.api_key,
-            model=settings.model,
-            base_url=settings.base_url,
-            timeout=settings.timeout,
-        )
+        if llm_client is None:
+            client = client_factory(
+                api_key=settings.api_key,
+                model=settings.model,
+                base_url=settings.base_url,
+                timeout=settings.timeout,
+            )
+        else:
+            client = llm_client
         loop = AgentLoop(
             client,
             registry,
