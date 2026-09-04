@@ -34,14 +34,16 @@ class CodingAgent:
         settings: Settings,
         *,
         approval_ask: Callable[[WritePreview], bool] | None = None,
+        approval_record: Callable[..., None] | None = None,
         limits: AgentLimits | None = None,
         repository_context_builder: Callable[[Workspace], str] = build_repository_context,
         llm_client: Any | None = None,
+        llm_client_factory: Callable[..., Any] | None = None,
     ) -> "CodingAgent":
         repository = resolve_repository(Path(repo))
         workspace = Workspace(repository)
         registry = ToolRegistry()
-        approval_gate = WriteApprovalGate(ask=approval_ask)
+        approval_gate = WriteApprovalGate(ask=approval_ask, record=approval_record)
         tools = [
             ListFilesTool(workspace),
             ReadFileTool(workspace),
@@ -55,7 +57,8 @@ class CodingAgent:
                 tool.parameters,
                 description=tool.description,
             )
-        client = llm_client or LLMClient(
+        client_factory = llm_client_factory or LLMClient
+        client = llm_client or client_factory(
             api_key=settings.api_key,
             model=settings.model,
             base_url=settings.base_url,
@@ -68,6 +71,10 @@ class CodingAgent:
             limits=limits,
         )
         return cls(loop, workspace, registry)
+
+    @property
+    def limits(self) -> AgentLimits:
+        return self.loop.limits
 
     def ask(self, query: str, *, recorder: RunRecorder | None = None) -> str:
         sink = RecorderEventSink(recorder) if recorder is not None else NullEventSink()

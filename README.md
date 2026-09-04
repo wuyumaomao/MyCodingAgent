@@ -60,6 +60,15 @@ coding-agent "package.json 里有哪些可用命令" --repo .
 
 工具调用的校验顺序是：`ResponseParser -> 工具查找 -> JSON Schema -> 工具安全检查 -> 执行`。模型返回的 arguments 先按注册时提供的 JSON Schema 在客户端校验；缺少必填字段、类型错误、数值越界或包含不允许的额外字段时，不会调用工具，而是把 `invalid_tool_arguments` 作为结构化 `role: tool` 结果回传给模型。Schema 只负责参数结构，工作区边界、文件存在性、权限和编码等运行时安全检查仍由具体工具负责。Provider 支持的 `strict` schema 只是额外约束，不能替代客户端校验。
 
+库调用可以通过 `CodingAgent.from_settings()` 创建一个可复用的 Agent，再使用 `ask()` 执行独立任务：
+
+```python
+agent = CodingAgent.from_settings(repo, settings)
+answer = agent.ask("解释项目结构")
+```
+
+`from_settings()` 负责装配 `Workspace`、模型客户端、工具注册表和循环依赖；每次 `ask()` 都会创建新的对话上下文、工具调用计数和事件接收器。若需要保存本次运行的 trace/report，应为每次 `ask()` 创建新的 `RunRecorder` 并显式传入。CLI 也通过同一 facade 启动 Agent。
+
 上下文由 `ConversationContext` 管理：system messages 在一次 run 内保持不变，history 按顺序追加用户请求、assistant tool call 和 tool result；每轮请求都会发送完整消息历史。
 
 每次 CLI 提问都会创建一个独立的 run。运行结束后，CLI 会在标准错误中显示 run ID 和 trace 路径：

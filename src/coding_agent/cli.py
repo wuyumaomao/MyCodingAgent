@@ -5,17 +5,13 @@ from pathlib import Path
 import sys
 from typing import Sequence
 
-from .agent import AgentError, AgentLimits, AgentLoop, AgentService
+from .agent import AgentError, AgentLimits, AgentService
+from .coding_agent import CodingAgent
 from .config import ConfigError, Settings
 from .llm import LLMClient
 from .repository import RepositoryError, Workspace, resolve_repository
 from .trace import RunRecorder
 from .tools.approval import WriteApprovalGate, WritePreview
-from .tools.listfiles import ListFilesTool
-from .tools.patchfile import PatchFileTool
-from .tools.readfile import ReadFileTool
-from .tools.registry import ToolRegistry
-from .tools.writefile import WriteFileTool
 
 
 RUNS_ROOT = Path(__file__).resolve().parents[2] / ".coding-agent" / "runs"
@@ -43,54 +39,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         workspace = Workspace(repository)
         recorder = RunRecorder.create(" ".join(args.query), repository, RUNS_ROOT)
         settings = Settings.from_args_and_env(args)
-        registry = ToolRegistry()
-        listfiles = ListFilesTool(workspace)
-        readfile = ReadFileTool(workspace)
-        approval_gate = WriteApprovalGate(
-            ask=_ask_write_approval if sys.stdin.isatty() else None,
-            record=recorder.record,
+        agent = CodingAgent.from_settings(
+            args.repo,
+            settings,
+            approval_ask=_ask_write_approval if sys.stdin.isatty() else None,
+            approval_record=recorder.record,
+            limits=AgentLimits(max_calls_per_tool=args.max_tool_calls),
+            llm_client_factory=LLMClient,
         )
-        writefile = WriteFileTool(workspace, approval_gate)
-        patchfile = PatchFileTool(workspace, approval_gate)
-        registry.register(
-            listfiles.name,
-            listfiles.execute,
-            listfiles.parameters,
-            description=listfiles.description,
-        )
-        registry.register(
-            readfile.name,
-            readfile.execute,
-            readfile.parameters,
-            description=readfile.description,
-        )
-        registry.register(
-            writefile.name,
-            writefile.execute,
-            writefile.parameters,
-            description=writefile.description,
-        )
-        registry.register(
-            patchfile.name,
-            patchfile.execute,
-            patchfile.parameters,
-            description=patchfile.description,
-        )
-        llm_client = LLMClient(
-            api_key=settings.api_key,
-            model=settings.model,
-            base_url=settings.base_url,
-            timeout=settings.timeout,
-        )
-        #cli装配好llm，tool-registry，encoder，contextbuilder给agentloop。run的时候传入query和workspace
-        service = AgentService(
-            AgentLoop(
-                llm_client,
-                registry,
-                recorder=recorder,
-                limits=AgentLimits(max_calls_per_tool=args.max_tool_calls),
-            )
-        )
+        service = AgentService(agent)
+        service.recorder = recorder
         answer = service.run(" ".join(args.query), workspace)
     except Exception as exc:#抛出了异常，记录是哪里出错了
         if recorder is not None and recorder.status == "running":

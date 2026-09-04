@@ -114,8 +114,13 @@ def _duration_ms(started: float) -> float:
 
 
 class AgentService:
-    def __init__(self, loop: AgentLoop) -> None:
+    """Compatibility adapter for callers that still use AgentService."""
+
+    def __init__(self, loop: AgentLoop | Any, *, recorder: RunRecorder | None = None) -> None:
         self.loop = loop
+        self.recorder = recorder
 
     def run(self, query: str, workspace: Workspace) -> str:
+        if hasattr(self.loop, "ask"):
+            return self.loop.ask(query, recorder=self.recorder)
         return self.loop.run(query, workspace)
