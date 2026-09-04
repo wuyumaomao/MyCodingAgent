@@ -185,7 +185,12 @@ def test_write_approval_trace_is_summary_and_report_has_preview(sample_git_repo,
     report_events = json.loads(recorder.report_path.read_text(encoding="utf-8"))["events"]
     trace_request = next(event for event in trace_events if event["type"] == "approval_request")
     report_request = next(event for event in report_events if event["type"] == "approval_request")
+    trace_call = next(event for event in trace_events if event["type"] == "tool_call")
+    report_call = next(event for event in report_events if event["type"] == "tool_call")
     event_types = [event["type"] for event in trace_events]
     assert event_types.index("approval_request") < event_types.index("approval_result") < event_types.index("tool_result")
     assert "preview" not in trace_request
     assert report_request["preview"]["content"] == "print('ok')"
+    assert "content" not in trace_call["arguments"]
+    assert trace_call["arguments"]["content_bytes"] == len("print('ok')".encode("utf-8"))
+    assert report_call["arguments"]["content"] == "print('ok')"

@@ -128,11 +128,13 @@ class AgentLoop:
             context.add_assistant_turn(turn)#工具调用来了，追加 assistant 消息
             for call in turn.tool_calls:#把工具调用记录写到trace
                 if self.recorder:
+                    arguments_summary = _tool_arguments_summary(call.name, call.arguments)
                     self.recorder.record(
                         "tool_call",
                         id=call.id,
                         name=call.name,
-                        arguments=call.arguments,
+                        arguments=arguments_summary,
+                        report_payload={"arguments": call.arguments},
                     )
                 current_count = self._tool_call_counts.get(call.name, 0)
                 if current_count >= self.limits.max_calls_per_tool:
@@ -182,6 +184,24 @@ class AgentLoop:
 
 def _duration_ms(started: float) -> float:
     return round((time.perf_counter() - started) * 1000, 3)
+
+
+def _tool_arguments_summary(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Keep large write payloads out of the concise trace while preserving report detail."""
+    if name == "write_file":
+        summary = {key: value for key, value in arguments.items() if key != "content"}
+        content = arguments.get("content")
+        if isinstance(content, str):
+            summary["content_bytes"] = len(content.encode("utf-8"))
+        return summary
+    if name == "patch_file":
+        summary = {key: value for key, value in arguments.items() if key not in {"old_text", "new_text"}}
+        for key in ("old_text", "new_text"):
+            value = arguments.get(key)
+            if isinstance(value, str):
+                summary[f"{key}_bytes"] = len(value.encode("utf-8"))
+        return summary
+    return dict(arguments)
 
 
 class AgentService:
