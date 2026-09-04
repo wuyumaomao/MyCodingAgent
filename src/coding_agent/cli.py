@@ -10,9 +10,12 @@ from .config import ConfigError, Settings
 from .llm import LLMClient
 from .repository import RepositoryError, Workspace, resolve_repository
 from .trace import RunRecorder
+from .tools.approval import WriteApprovalGate, WritePreview
 from .tools.listfiles import ListFilesTool
+from .tools.patchfile import PatchFileTool
 from .tools.readfile import ReadFileTool
 from .tools.registry import ToolRegistry
+from .tools.writefile import WriteFileTool
 
 
 RUNS_ROOT = Path(__file__).resolve().parents[2] / ".coding-agent" / "runs"
@@ -43,6 +46,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         registry = ToolRegistry()
         listfiles = ListFilesTool(workspace)
         readfile = ReadFileTool(workspace)
+        approval_gate = WriteApprovalGate(
+            ask=_ask_write_approval if sys.stdin.isatty() else None,
+            record=recorder.record,
+        )
+        writefile = WriteFileTool(workspace, approval_gate)
+        patchfile = PatchFileTool(workspace, approval_gate)
         registry.register(
             listfiles.name,
             listfiles.execute,
@@ -54,6 +63,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             readfile.execute,
             readfile.parameters,
             description=readfile.description,
+        )
+        registry.register(
+            writefile.name,
+            writefile.execute,
+            writefile.parameters,
+            description=writefile.description,
+        )
+        registry.register(
+            patchfile.name,
+            patchfile.execute,
+            patchfile.parameters,
+            description=patchfile.description,
         )
         llm_client = LLMClient(
             api_key=settings.api_key,
@@ -97,6 +118,32 @@ def _error_type(error: Exception) -> str:
     if isinstance(error, AgentError):
         return "agent_error"
     return "runtime_error"
+
+
+def _ask_write_approval(preview: WritePreview) -> bool:
+    print("\nWrite approval required", file=sys.stderr)
+    print(f"Operation: {preview.operation}", file=sys.stderr)
+    print(f"Path: {preview.path}", file=sys.stderr)
+    if preview.existed:
+        print("WARNING: this will overwrite an existing file.", file=sys.stderr)
+    if preview.content is not None:
+        print("Content preview:", file=sys.stderr)
+        print(_preview_text(preview.content), file=sys.stderr)
+    if preview.old_text is not None or preview.new_text is not None:
+        print("Patch preview:", file=sys.stderr)
+        print(f"- {_preview_text(preview.old_text or '')}", file=sys.stderr)
+        print(f"+ {_preview_text(preview.new_text or '')}", file=sys.stderr)
+    try:
+        answer = input("Approve this write? [y/N] ")
+    except (EOFError, KeyboardInterrupt):
+        return False
+    return answer.strip().lower() in {"y", "yes"}
+
+
+def _preview_text(value: str, limit: int = 2000) -> str:
+    if len(value) <= limit:
+        return value
+    return value[:limit] + "...[truncated]"
 
 
 def _safe_error_message(error: Exception) -> str:

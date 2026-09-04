@@ -6,6 +6,7 @@ import json
 from coding_agent.cli import main
 from coding_agent.config import Settings
 from coding_agent.models import AssistantTurn, ToolCall
+from coding_agent.tools.approval import WritePreview
 
 
 class FakeClient:
@@ -184,3 +185,54 @@ def test_cli_passes_max_tool_calls(monkeypatch, sample_git_repo, tmp_path):
     monkeypatch.setattr("coding_agent.cli.LLMClient", lambda **kwargs: FakeClient([]))
     assert main(["Explain", "--max-tool-calls", "5", "--repo", str(sample_git_repo)]) == 0
     assert captured["limit"] == 5
+
+
+def test_ask_write_approval_accepts_only_yes(monkeypatch, sample_git_repo):
+    from coding_agent.cli import _ask_write_approval
+
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _: "yes")
+    assert _ask_write_approval(WritePreview("create", "new.py", content="hello")) is True
+
+    monkeypatch.setattr("builtins.input", lambda _: "y")
+    assert _ask_write_approval(WritePreview("create", "new.py", content="hello")) is True
+
+    monkeypatch.setattr("builtins.input", lambda _: "yes please")
+    assert _ask_write_approval(WritePreview("create", "new.py", content="hello")) is False
+
+
+def test_cli_write_tool_requires_approval_and_can_write(monkeypatch, sample_git_repo, tmp_path):
+    monkeypatch.setenv("CODING_AGENT_API_KEY", "test-key")
+    monkeypatch.setenv("CODING_AGENT_MODEL", "test-model")
+    monkeypatch.setattr("coding_agent.cli.RUNS_ROOT", tmp_path / "runs")
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _: "y")
+    monkeypatch.setattr(
+        "coding_agent.cli.LLMClient",
+        lambda **kwargs: FakeClient([
+            AssistantTurn(None, [ToolCall("write-1", "write_file", {"path": "new.py", "content": "ok"})]),
+            AssistantTurn("written", []),
+        ]),
+    )
+
+    assert main(["Create", "file", "--repo", str(sample_git_repo)]) == 0
+    assert (sample_git_repo / "new.py").read_text(encoding="utf-8") == "ok"
+
+
+def test_cli_write_tool_denied_does_not_modify(monkeypatch, sample_git_repo, tmp_path, capsys):
+    monkeypatch.setenv("CODING_AGENT_API_KEY", "test-key")
+    monkeypatch.setenv("CODING_AGENT_MODEL", "test-model")
+    monkeypatch.setattr("coding_agent.cli.RUNS_ROOT", tmp_path / "runs")
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _: "n")
+    monkeypatch.setattr(
+        "coding_agent.cli.LLMClient",
+        lambda **kwargs: FakeClient([
+            AssistantTurn(None, [ToolCall("write-1", "write_file", {"path": "new.py", "content": "ok"})]),
+            AssistantTurn("not written", []),
+        ]),
+    )
+
+    assert main(["Create", "file", "--repo", str(sample_git_repo)]) == 0
+    assert not (sample_git_repo / "new.py").exists()
+    assert "not written" in capsys.readouterr().out
