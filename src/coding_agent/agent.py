@@ -10,8 +10,9 @@ from .model_gateway import ModelGateway, ModelGatewayError
 from .models import AssistantTurn, ToolCall
 from .repository import Workspace
 from .tools.registry import ToolRegistry
-from .tools.schema import ToolSchemaError
 from .trace import RunRecorder
+from .events import NullEventSink, RecorderEventSink
+from .tool_executor import ToolExecutor
 
 
 class AgentError(RuntimeError):
@@ -50,11 +51,12 @@ class AgentLoop:
         self.repository_context_builder = repository_context_builder
         self.recorder = recorder
         self.max_rounds = self.limits.max_rounds
-        self._tool_call_counts: dict[str, int] = {}
 
     def run(self, query: str, workspace: Workspace) -> str:
         context = ConversationContext(workspace, self.repository_context_builder)
         context.add_user_request(query)
+        event_sink = RecorderEventSink(self.recorder) if self.recorder else NullEventSink()
+        tool_executor = ToolExecutor(self.registry, self.limits, event_sink)
         for round_number in range(1, self.max_rounds + 1):
             messages = context.messages()#获取要发送的信息
             tool_definitions = self.registry.definitions()
@@ -105,90 +107,15 @@ class AgentLoop:
                 return answer
             context.add_assistant_turn(turn)#工具调用来了，追加 assistant 消息
             for call in turn.tool_calls:#把工具调用记录写到trace
-                if self.recorder:
-                    arguments_summary = _tool_arguments_summary(call.name, call.arguments)
-                    self.recorder.record(
-                        "tool_call",
-                        id=call.id,
-                        name=call.name,
-                        arguments=arguments_summary,
-                        report_payload={"arguments": call.arguments},
-                    )
-                current_count = self._tool_call_counts.get(call.name, 0)
-                if current_count >= self.limits.max_calls_per_tool:
-                    result = {
-                        "ok": False,
-                        "error": {
-                            "type": "tool_call_limit",
-                            "message": f"Tool {call.name} reached its call limit",
-                        },
-                    }
-                    if self.recorder:
-                        self.recorder.record(
-                            "tool_call_limit",
-                            name=call.name,
-                            max_calls=self.limits.max_calls_per_tool,
-                            observed=current_count,
-                        )
-                    tool_duration = 0.0
-                else:
-                    self._tool_call_counts[call.name] = current_count + 1
-                    tool_started = time.perf_counter()
-                    result = self._execute(call)#执行call
-                    tool_duration = _duration_ms(tool_started)
-                if self.recorder:#记录工具调用的结果
-                    self.recorder.record(
-                        "tool_result",
-                        id=call.id,
-                        name=call.name,
-                        ok=result.get("ok"),
-                        duration_ms=tool_duration,
-                        report_payload={"result": result},
-                    )
-                context.add_tool_result(call, result)#追加 tool 结果消息
+                execution = tool_executor.execute(call)
+                context.add_tool_result(call, execution.result)#追加 tool 结果消息
         answer = f"Reached the tool-call limit of {self.max_rounds} rounds before the task was complete."
         if self.recorder:#执行到循环外部了，则触发结束
             self.recorder.fail("round_limit", "Reached the tool-call limit")
         return answer
 
-    def _execute(self, call: ToolCall) -> dict[str, Any]:
-        try:
-            self.registry.validate(call.name, call.arguments)
-            return self.registry.execute(call.name, call.arguments)
-        except KeyError:
-            return {"ok": False, "error": {"type": "unknown_tool", "message": "Unknown tool"}}
-        except ToolSchemaError:
-            return {
-                "ok": False,
-                "error": {
-                    "type": "invalid_tool_arguments",
-                    "message": "Tool arguments do not match the registered schema",
-                },
-            }
-        except Exception:
-            return {"ok": False, "error": {"type": "tool_error", "message": "Tool execution failed"}}
-
-
 def _duration_ms(started: float) -> float:
     return round((time.perf_counter() - started) * 1000, 3)
-
-
-def _tool_arguments_summary(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Keep large write payloads out of the concise trace while preserving report detail."""
-    if name == "write_file":
-        summary = {key: value for key, value in arguments.items() if key != "content"}
-        content = arguments.get("content")
-        if isinstance(content, str):
-            summary["content_bytes"] = len(content.encode("utf-8"))
-        return summary
-    if name == "patch_file":
-        summary = {key: value for key, value in arguments.items() if key not in {"old_text", "new_text"}}
-        for key in ("old_text", "new_text"):
-            value = arguments.get(key)
-            if isinstance(value, str):
-                summary[f"{key}_bytes"] = len(value.encode("utf-8"))
-        return summary
-    return dict(arguments)
 
 
 class AgentService:
