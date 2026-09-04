@@ -40,7 +40,7 @@
 - `ToolRegistry.schema(name: str) -> dict[str, Any]`：返回注册的 Schema；未知工具抛出 `KeyError`。
 - `ToolRegistry.validate(name: str, arguments: Any) -> None`：查找工具 Schema 并校验参数；未知工具保留 `KeyError`。
 
-- [ ] **步骤 1：编写 Registry 和校验器失败测试**
+- [x] **步骤 1：编写 Registry 和校验器失败测试**
 
 增加以下覆盖：
 
@@ -68,7 +68,7 @@ def test_registry_validates_required_type_and_extra_fields():
 
 同时断言：`{"type": "array"}` 这样的错误定义会在 `register` 时被拒绝；合法定义仍可通过 `definitions()` 导出；未知工具仍抛出 `KeyError`。
 
-- [ ] **步骤 2：运行聚焦测试并确认失败**
+- [x] **步骤 2：运行聚焦测试并确认失败**
 
 运行：
 
@@ -78,15 +78,15 @@ uv run pytest tests/test_registry.py -q
 
 预期：失败，因为 `ToolSchemaValidator`、`ToolSchemaError` 和 Registry 校验方法尚不存在。
 
-- [ ] **步骤 3：增加依赖并实现校验器**
+- [x] **步骤 3：增加依赖并实现校验器**
 
 在项目主依赖中增加 `jsonschema>=4.0`，然后运行 `uv lock` 更新锁文件。在 `schema.py` 中使用 `Draft202012Validator.check_schema(schema)` 校验开发者提供的定义，使用 `Draft202012Validator(schema).iter_errors(arguments)` 校验模型调用参数。按 JSON path 对校验错误稳定排序，但对外只暴露统一消息：`Tool arguments do not match the registered schema`。
 
-- [ ] **步骤 4：将校验接入 ToolRegistry**
+- [x] **步骤 4：将校验接入 ToolRegistry**
 
 在 `_tools` 和 `_definitions` 旁边增加私有 `_schemas` 映射。`register` 必须在修改 Registry 状态前完成 Schema 校验；`schema()` 返回防御性拷贝；`validate()` 查找对应 Schema，并委托给 `ToolSchemaValidator.validate_arguments()`。
 
-- [ ] **步骤 5：运行聚焦测试并确认通过**
+- [x] **步骤 5：运行聚焦测试并确认通过**
 
 运行：
 
@@ -96,7 +96,7 @@ uv run pytest tests/test_registry.py -q
 
 预期：通过，包括现有工具注册和未知工具行为。
 
-- [ ] **步骤 6：提交 Registry 层**
+- [x] **步骤 6：提交 Registry 层**
 
 ```powershell
 git add src/coding_agent/tools/schema.py src/coding_agent/tools/registry.py pyproject.toml uv.lock tests/test_registry.py
@@ -114,11 +114,11 @@ git commit -m "feat: add tool schema validation contract"
 - `AgentLoop._execute(call: ToolCall) -> dict[str, Any]` 继续作为唯一的工具执行边界。
 - `_execute()` 对未注册工具返回 `unknown_tool`，对 Schema 失败返回 `invalid_tool_arguments`，只有校验通过后才委托具体执行器。
 
-- [ ] **步骤 1：编写 AgentLoop 失败测试**
+- [x] **步骤 1：编写 AgentLoop 失败测试**
 
 增加一个带调用计数的 spy executor 和两轮 fake model。第一轮模型调用 `readfile`，参数为 `{"path": 123}`；第二轮返回最终答案。断言最终答案正常返回、spy executor 调用次数为 0、第二次模型请求包含带有 `invalid_tool_arguments` 的 tool 消息。另加未知工具测试，确认返回 `unknown_tool` 而不是抛出异常。保留现有 workspace violation 测试，证明 Schema 合法的参数仍会进入工具级安全检查。
 
-- [ ] **步骤 2：运行聚焦 AgentLoop 测试并确认失败**
+- [x] **步骤 2：运行聚焦 AgentLoop 测试并确认失败**
 
 运行：
 
@@ -128,7 +128,7 @@ uv run pytest tests/test_agent.py -q
 
 预期：失败，因为当前 `_execute()` 直接调用执行器，没有调用 `ToolRegistry.validate()`。
 
-- [ ] **步骤 3：在 `_execute()` 中增加校验门**
+- [x] **步骤 3：在 `_execute()` 中增加校验门**
 
 在调用 `registry.execute()` 前调用 `registry.validate(call.name, call.arguments)`。将 `ToolSchemaError` 转换为：
 
@@ -144,11 +144,11 @@ uv run pytest tests/test_agent.py -q
 
 保留现有 `KeyError` 到 `unknown_tool` 的映射，以及执行器未知异常到 `tool_error` 的映射。不要改变 `ConversationContext` 消息顺序或每个工具的调用限制行为。
 
-- [ ] **步骤 4：增加被拒绝调用的 trace 断言**
+- [x] **步骤 4：增加被拒绝调用的 trace 断言**
 
 断言 Schema 拒绝的调用仍会记录 `tool_call` 和 `tool_result`；`tool_result.ok` 为 false；结果中包含 `invalid_tool_arguments`；具体执行器没有被调用。该 tool result 必须进入下一次 LLM 请求，使模型能够修正参数并恢复。
 
-- [ ] **步骤 5：运行 AgentLoop 和 trace 测试**
+- [x] **步骤 5：运行 AgentLoop 和 trace 测试**
 
 运行：
 
@@ -158,7 +158,7 @@ uv run pytest tests/test_agent.py tests/test_trace_integration.py -q
 
 预期：通过，已有成功调用、workspace 错误、工具调用限制和 trace 顺序保持不变。
 
-- [ ] **步骤 6：提交执行校验门**
+- [x] **步骤 6：提交执行校验门**
 
 ```powershell
 git add src/coding_agent/agent.py tests/test_agent.py tests/test_trace_integration.py
@@ -178,11 +178,11 @@ git commit -m "feat: validate tool calls before execution"
 - `ReadFileTool.parameters` 和 `ListFilesTool.parameters` 继续作为 CLI 注册并发送给 provider 的 Schema。
 - 具体工具的 `execute()` 方法继续保留运行时检查，作为纵深防御。
 
-- [ ] **步骤 1：编写 Schema 和兼容性测试**
+- [x] **步骤 1：编写 Schema 和兼容性测试**
 
 断言内置 Schema 的顶层 `type` 为 `object`，并声明 `additionalProperties: False`；`readfile` 必须要求 `path`；`listfiles` 必须声明非负的 `max_depth` 和正数的 `max_entries`。增加执行测试，证明无论通过 Registry 校验路径还是直接调用工具，错误参数都能得到一致处理。
 
-- [ ] **步骤 2：运行内置工具测试并定位失败**
+- [x] **步骤 2：运行内置工具测试并定位失败**
 
 运行：
 
@@ -192,11 +192,11 @@ uv run pytest tests/test_readfile.py tests/test_listfiles.py tests/test_llm.py -
 
 预期：现有直接调用工具的测试保持通过；如果 Schema 不一致，测试会指出需要修正的内置定义。
 
-- [ ] **步骤 3：只收紧 PRD 要求的声明级约束**
+- [x] **步骤 3：只收紧 PRD 要求的声明级约束**
 
 保留 `listfiles` 的可选字段，保持直接工具调用的错误类型稳定，只增加实现已经执行的约束。不要把文件存在性、仓库边界、权限、编码或文件大小规则放入 JSON Schema。
 
-- [ ] **步骤 4：运行完整测试套件**
+- [x] **步骤 4：运行完整测试套件**
 
 运行：
 
@@ -206,7 +206,7 @@ uv run pytest -q
 
 预期：已有测试和新增 Schema 测试全部通过。
 
-- [ ] **步骤 5：提交内置工具 Schema 覆盖**
+- [x] **步骤 5：提交内置工具 Schema 覆盖**
 
 ```powershell
 git add src/coding_agent/tools/readfile.py src/coding_agent/tools/listfiles.py tests/test_readfile.py tests/test_listfiles.py tests/test_llm.py
@@ -222,15 +222,15 @@ git commit -m "test: cover built-in tool schemas"
 **接口：**
 - 面向用户的文档说明校验顺序和可恢复的 Schema 错误，不承诺 Schema 可以替代运行时安全检查。
 
-- [ ] **步骤 1：更新 README 架构和错误行为说明**
+- [x] **步骤 1：更新 README 架构和错误行为说明**
 
 说明 Agent 会在执行 `listfiles` 或 `readfile` 前，根据注册的 JSON Schema 校验已解析的 tool arguments；无效参数会作为结构化 tool result 返回模型；路径和文件系统安全检查仍由工具负责。
 
-- [ ] **步骤 2：自检 PRD 和 README**
+- [x] **步骤 2：自检 PRD 和 README**
 
 确认所有文档都一致描述以下顺序：`ResponseParser -> 工具查找 -> JSON Schema -> 工具安全检查 -> 执行`；确认错误类型统一为 `invalid_tool_arguments`；确认 provider 的 `strict` 是可选能力。
 
-- [ ] **步骤 3：运行最终验证命令**
+- [x] **步骤 3：运行最终验证命令**
 
 运行：
 
@@ -242,7 +242,7 @@ git diff --check
 
 预期：测试通过、编译成功且没有空白字符错误。
 
-- [ ] **步骤 4：提交文档和最终验证**
+- [x] **步骤 4：提交文档和最终验证**
 
 ```powershell
 git add README.md docs/superpowers/specs/2026-08-31-coding-agent-readonly-mvp-prd.md

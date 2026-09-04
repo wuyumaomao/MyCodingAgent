@@ -174,10 +174,13 @@ def test_trace_records_schema_rejection_without_running_executor(sample_git_repo
     AgentLoop(llm, registry, recorder=recorder).run("read", Workspace(sample_git_repo))
 
     trace = json.loads(recorder.trace_path.read_text(encoding="utf-8"))
+    report = json.loads(recorder.report_path.read_text(encoding="utf-8"))
     result = next(event for event in trace["events"] if event["type"] == "tool_result")
+    report_result = next(event for event in report["events"] if event["type"] == "tool_result")
     assert calls == []
     assert result["ok"] is False
-    assert result["result"]["error"]["type"] == "invalid_tool_arguments"
+    assert "result" not in result
+    assert report_result["result"]["error"]["type"] == "invalid_tool_arguments"
 
 
 def test_trace_and_report_share_event_sequence(sample_git_repo, tmp_path):
