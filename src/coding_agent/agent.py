@@ -6,7 +6,7 @@ import time
 from typing import Any
 
 from .context import ConversationContext, build_repository_context
-from .llm import InvalidToolArguments, LLMResponseError, LLMTimeoutError
+from .model_gateway import ModelGateway, ModelGatewayError
 from .models import AssistantTurn, ToolCall
 from .repository import Workspace
 from .tools.registry import ToolRegistry
@@ -45,6 +45,7 @@ class AgentLoop:
             raise ValueError("Pass limits or max_rounds, not both")
         self.limits = limits or AgentLimits(max_rounds=max_rounds or 10)
         self.llm_client = llm_client
+        self.model_gateway = ModelGateway(llm_client)
         self.registry = registry
         self.repository_context_builder = repository_context_builder
         self.recorder = recorder
@@ -66,39 +67,15 @@ class AgentLoop:
                 )
             request_started = time.perf_counter()
             try:#llm返回结果
-                turn: AssistantTurn = self.llm_client.complete(messages, tool_definitions)#在这里检查工具参数是否合法
-            except LLMTimeoutError as exc:
+                turn: AssistantTurn = self.model_gateway.complete(messages, tool_definitions)
+            except ModelGatewayError as exc:
                 if self.recorder:
                     self.recorder.fail(
-                        "timeout",
-                        "The model request timed out",
+                        exc.error_type,
+                        exc.public_message,
                         duration_ms=_duration_ms(request_started),
                     )
-                raise AgentError("The model request timed out") from exc
-            except InvalidToolArguments as exc:
-                if self.recorder:
-                    self.recorder.fail(
-                        "invalid_tool_arguments",
-                        "The model returned invalid tool arguments",
-                        duration_ms=_duration_ms(request_started),
-                    )
-                raise AgentError("The model returned invalid tool arguments") from exc
-            except LLMResponseError as exc:
-                if self.recorder:
-                    self.recorder.fail(
-                        "invalid_response",
-                        "The model returned an invalid response",
-                        duration_ms=_duration_ms(request_started),
-                    )
-                raise AgentError("The model returned an invalid response") from exc
-            except Exception as exc:
-                if self.recorder:
-                    self.recorder.fail(
-                        "provider_error",
-                        "The model request failed",
-                        duration_ms=_duration_ms(request_started),
-                    )
-                raise AgentError("The model request failed") from exc
+                raise AgentError(exc.public_message) from exc
             if self.recorder:#record记录llm response
                 response_payload: dict[str, object] = {
                     "round": round_number,
