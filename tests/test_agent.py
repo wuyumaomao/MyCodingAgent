@@ -170,6 +170,31 @@ def test_loop_rejects_tool_after_per_tool_limit(sample_git_repo):
     assert "tool_call_limit" in llm.messages[-1][-1]["content"]
 
 
+def test_loop_accepts_event_sink_and_can_be_reused(sample_git_repo):
+    class Sink:
+        def __init__(self):
+            self.events = []
+            self.completed = []
+            self.failed = []
+
+        def emit(self, event_type, **payload):
+            self.events.append(event_type)
+
+        def complete(self, answer):
+            self.completed.append(answer)
+
+        def fail(self, error_type, message, *, duration_ms=None):
+            self.failed.append(error_type)
+
+    llm = FakeLLM([AssistantTurn("one", []), AssistantTurn("two", [])])
+    sink = Sink()
+    loop = AgentLoop(llm, make_registry(sample_git_repo), max_rounds=1)
+    assert loop.run("first", Workspace(sample_git_repo), event_sink=sink) == "one"
+    assert loop.run("second", Workspace(sample_git_repo), event_sink=sink) == "two"
+    assert sink.completed == ["one", "two"]
+    assert sink.failed == []
+
+
 def test_loop_returns_write_approval_error_to_model(sample_git_repo):
     llm = FakeLLM([
         AssistantTurn(None, [ToolCall("write-1", "write_file", {"path": "new.py", "content": "ok"})]),

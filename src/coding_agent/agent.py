@@ -52,66 +52,61 @@ class AgentLoop:
         self.recorder = recorder
         self.max_rounds = self.limits.max_rounds
 
-    def run(self, query: str, workspace: Workspace) -> str:
+    def run(self, query: str, workspace: Workspace, *, event_sink: Any | None = None) -> str:
         context = ConversationContext(workspace, self.repository_context_builder)
         context.add_user_request(query)
-        event_sink = RecorderEventSink(self.recorder) if self.recorder else NullEventSink()
-        tool_executor = ToolExecutor(self.registry, self.limits, event_sink)
+        sink = event_sink or (RecorderEventSink(self.recorder) if self.recorder else NullEventSink())
+        tool_executor = ToolExecutor(self.registry, self.limits, sink)
         for round_number in range(1, self.max_rounds + 1):
             messages = context.messages()#获取要发送的信息
             tool_definitions = self.registry.definitions()
-            if self.recorder:#record记录llm request
-                self.recorder.record(
-                    "llm_request",
-                    round=round_number,
-                    message_count=len(messages),
-                    report_payload={"messages": messages, "tools": tool_definitions},
-                )
+            sink.emit(
+                "llm_request",
+                round=round_number,
+                message_count=len(messages),
+                report_payload={"messages": messages, "tools": tool_definitions},
+            )
             request_started = time.perf_counter()
             try:#llm返回结果
                 turn: AssistantTurn = self.model_gateway.complete(messages, tool_definitions)
             except ModelGatewayError as exc:
-                if self.recorder:
-                    self.recorder.fail(
-                        exc.error_type,
-                        exc.public_message,
-                        duration_ms=_duration_ms(request_started),
-                    )
-                raise AgentError(exc.public_message) from exc
-            if self.recorder:#record记录llm response
-                response_payload: dict[str, object] = {
-                    "round": round_number,
-                    "has_content": bool(turn.content),
-                    "tool_call_count": len(turn.tool_calls),
-                    "duration_ms": _duration_ms(request_started),
-                }
-                self.recorder.record(
-                    "llm_response",
-                    report_payload={
-                        "content": turn.content,
-                        "tool_calls": [
-                            {
-                                "id": call.id,
-                                "name": call.name,
-                                "arguments": call.arguments,
-                            }
-                            for call in turn.tool_calls
-                        ],
-                    },
-                    **response_payload,
+                sink.fail(
+                    exc.error_type,
+                    exc.public_message,
+                    duration_ms=_duration_ms(request_started),
                 )
+                raise AgentError(exc.public_message) from exc
+            response_payload: dict[str, object] = {
+                "round": round_number,
+                "has_content": bool(turn.content),
+                "tool_call_count": len(turn.tool_calls),
+                "duration_ms": _duration_ms(request_started),
+            }
+            sink.emit(
+                "llm_response",
+                report_payload={
+                    "content": turn.content,
+                    "tool_calls": [
+                        {
+                            "id": call.id,
+                            "name": call.name,
+                            "arguments": call.arguments,
+                        }
+                        for call in turn.tool_calls
+                    ],
+                },
+                **response_payload,
+            )
             if not turn.tool_calls:#若非toolcall则视为结束
                 answer = turn.content or "The model returned an empty response."
-                if self.recorder:
-                    self.recorder.complete(answer)
+                sink.complete(answer)
                 return answer
             context.add_assistant_turn(turn)#工具调用来了，追加 assistant 消息
             for call in turn.tool_calls:#把工具调用记录写到trace
                 execution = tool_executor.execute(call)
                 context.add_tool_result(call, execution.result)#追加 tool 结果消息
         answer = f"Reached the tool-call limit of {self.max_rounds} rounds before the task was complete."
-        if self.recorder:#执行到循环外部了，则触发结束
-            self.recorder.fail("round_limit", "Reached the tool-call limit")
+        sink.fail("round_limit", "Reached the tool-call limit")
         return answer
 
 def _duration_ms(started: float) -> float:
