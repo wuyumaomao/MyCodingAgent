@@ -152,6 +152,34 @@ def test_trace_records_tool_call_limit(sample_git_repo, tmp_path):
     assert any(event["type"] == "tool_call_limit" for event in trace["events"])
 
 
+def test_trace_records_schema_rejection_without_running_executor(sample_git_repo, tmp_path):
+    recorder = RunRecorder.create("read", sample_git_repo, tmp_path / "runs")
+    calls = []
+    registry = ToolRegistry()
+    registry.register(
+        "readfile",
+        lambda arguments: calls.append(arguments) or {"ok": True},
+        {
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+            "additionalProperties": False,
+        },
+    )
+    llm = FakeLLM([
+        AssistantTurn(None, [ToolCall("bad-1", "readfile", {"path": 123})]),
+        AssistantTurn("done", []),
+    ])
+
+    AgentLoop(llm, registry, recorder=recorder).run("read", Workspace(sample_git_repo))
+
+    trace = json.loads(recorder.trace_path.read_text(encoding="utf-8"))
+    result = next(event for event in trace["events"] if event["type"] == "tool_result")
+    assert calls == []
+    assert result["ok"] is False
+    assert result["result"]["error"]["type"] == "invalid_tool_arguments"
+
+
 def test_trace_and_report_share_event_sequence(sample_git_repo, tmp_path):
     recorder = RunRecorder.create("Explain", sample_git_repo, tmp_path / "runs")
     llm = FakeLLM([AssistantTurn("Done", [])])

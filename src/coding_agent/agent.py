@@ -10,6 +10,7 @@ from .llm import InvalidToolArguments, LLMResponseError, LLMTimeoutError
 from .models import AssistantTurn, ToolCall
 from .repository import Workspace
 from .tools.registry import ToolRegistry
+from .tools.schema import ToolSchemaError
 from .trace import RunRecorder
 
 
@@ -175,9 +176,18 @@ class AgentLoop:
 
     def _execute(self, call: ToolCall) -> dict[str, Any]:
         try:
+            self.registry.validate(call.name, call.arguments)
             return self.registry.execute(call.name, call.arguments)
         except KeyError:
             return {"ok": False, "error": {"type": "unknown_tool", "message": "Unknown tool"}}
+        except ToolSchemaError:
+            return {
+                "ok": False,
+                "error": {
+                    "type": "invalid_tool_arguments",
+                    "message": "Tool arguments do not match the registered schema",
+                },
+            }
         except Exception:
             return {"ok": False, "error": {"type": "tool_error", "message": "Tool execution failed"}}
 

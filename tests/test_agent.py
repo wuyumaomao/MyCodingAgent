@@ -204,3 +204,40 @@ def test_loop_asks_separately_for_multiple_write_calls(sample_git_repo):
     assert approvals == ["one.txt", "two.txt"]
     assert (sample_git_repo / "one.txt").read_text(encoding="utf-8") == "1"
     assert (sample_git_repo / "two.txt").read_text(encoding="utf-8") == "2"
+
+
+def test_loop_rejects_schema_invalid_arguments_before_executor(sample_git_repo):
+    calls = []
+    registry = ToolRegistry()
+    registry.register(
+        "readfile",
+        lambda arguments: calls.append(arguments) or {"ok": True},
+        {
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+            "additionalProperties": False,
+        },
+    )
+    llm = FakeLLM([
+        AssistantTurn(None, [ToolCall("bad-1", "readfile", {"path": 123})]),
+        AssistantTurn("I corrected the arguments.", []),
+    ])
+
+    answer = AgentLoop(llm, registry).run("Read a file", Workspace(sample_git_repo))
+
+    assert answer == "I corrected the arguments."
+    assert calls == []
+    assert "invalid_tool_arguments" in llm.messages[-1][-1]["content"]
+
+
+def test_loop_returns_unknown_tool_result(sample_git_repo):
+    llm = FakeLLM([
+        AssistantTurn(None, [ToolCall("unknown-1", "missing_tool", {})]),
+        AssistantTurn("That tool is unavailable.", []),
+    ])
+
+    answer = AgentLoop(llm, ToolRegistry()).run("Inspect", Workspace(sample_git_repo))
+
+    assert answer == "That tool is unavailable."
+    assert "unknown_tool" in llm.messages[-1][-1]["content"]
