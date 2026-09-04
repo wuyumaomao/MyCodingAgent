@@ -11,7 +11,9 @@ from coding_agent.models import AssistantTurn, ToolCall
 from coding_agent.repository import Workspace
 from coding_agent.tools.listfiles import ListFilesTool
 from coding_agent.tools.readfile import ReadFileTool
+from coding_agent.tools.approval import WriteApprovalGate
 from coding_agent.tools.registry import ToolRegistry
+from coding_agent.tools.writefile import WriteFileTool
 from coding_agent.trace import RunRecorder, TraceWriteError
 
 
@@ -163,3 +165,27 @@ def test_trace_and_report_share_event_sequence(sample_git_repo, tmp_path):
     report_request = next(event for event in report["events"] if event["type"] == "llm_request")
     assert "messages" not in trace_request
     assert "messages" in report_request
+
+
+def test_write_approval_trace_is_summary_and_report_has_preview(sample_git_repo, tmp_path):
+    recorder = RunRecorder.create("write", sample_git_repo, tmp_path / "runs")
+    workspace = Workspace(sample_git_repo)
+    registry = ToolRegistry()
+    gate = WriteApprovalGate(ask=lambda _: True, record=recorder.record)
+    writefile = WriteFileTool(workspace, gate)
+    registry.register(writefile.name, writefile.execute, writefile.parameters, description=writefile.description)
+    llm = FakeLLM([
+        AssistantTurn(None, [ToolCall("write-1", "write_file", {"path": "new.py", "content": "print('ok')"})]),
+        AssistantTurn("Done", []),
+    ])
+
+    AgentLoop(llm, registry, recorder=recorder).run("write", workspace)
+
+    trace_events = json.loads(recorder.trace_path.read_text(encoding="utf-8"))["events"]
+    report_events = json.loads(recorder.report_path.read_text(encoding="utf-8"))["events"]
+    trace_request = next(event for event in trace_events if event["type"] == "approval_request")
+    report_request = next(event for event in report_events if event["type"] == "approval_request")
+    event_types = [event["type"] for event in trace_events]
+    assert event_types.index("approval_request") < event_types.index("approval_result") < event_types.index("tool_result")
+    assert "preview" not in trace_request
+    assert report_request["preview"]["content"] == "print('ok')"

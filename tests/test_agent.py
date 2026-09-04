@@ -9,7 +9,10 @@ from coding_agent.models import AssistantTurn, ToolCall
 from coding_agent.repository import Workspace
 from coding_agent.tools.listfiles import ListFilesTool
 from coding_agent.tools.readfile import ReadFileTool
+from coding_agent.tools.approval import WriteApprovalGate
+from coding_agent.tools.patchfile import PatchFileTool
 from coding_agent.tools.registry import ToolRegistry
+from coding_agent.tools.writefile import WriteFileTool
 from coding_agent.trace import RunRecorder
 
 
@@ -32,6 +35,19 @@ def make_registry(repo):
     readfile = ReadFileTool(workspace)
     registry.register(listfiles.name, listfiles.execute, listfiles.parameters, description=listfiles.description)
     registry.register(readfile.name, readfile.execute, readfile.parameters, description=readfile.description)
+    return registry
+
+
+def make_write_registry(repo, approval_gate):
+    workspace = Workspace(repo)
+    registry = ToolRegistry()
+    for tool in (
+        ListFilesTool(workspace),
+        ReadFileTool(workspace),
+        WriteFileTool(workspace, approval_gate),
+        PatchFileTool(workspace, approval_gate),
+    ):
+        registry.register(tool.name, tool.execute, tool.parameters, description=tool.description)
     return registry
 
 
@@ -152,3 +168,39 @@ def test_loop_rejects_tool_after_per_tool_limit(sample_git_repo):
     ).run("read", Workspace(sample_git_repo))
     assert llm.messages[-1][-1]["role"] == "tool"
     assert "tool_call_limit" in llm.messages[-1][-1]["content"]
+
+
+def test_loop_returns_write_approval_error_to_model(sample_git_repo):
+    llm = FakeLLM([
+        AssistantTurn(None, [ToolCall("write-1", "write_file", {"path": "new.py", "content": "ok"})]),
+        AssistantTurn("I need approval to write the file.", []),
+    ])
+    registry = make_write_registry(sample_git_repo, WriteApprovalGate(ask=lambda _: False))
+
+    answer = AgentLoop(llm, registry).run("Create a file", Workspace(sample_git_repo))
+
+    assert answer == "I need approval to write the file."
+    assert "approval_denied" in llm.messages[-1][-1]["content"]
+    assert not (sample_git_repo / "new.py").exists()
+
+
+def test_loop_asks_separately_for_multiple_write_calls(sample_git_repo):
+    approvals = []
+    recorder = RunRecorder.create("write two", sample_git_repo, sample_git_repo / ".runs")
+    gate = WriteApprovalGate(ask=lambda preview: approvals.append(preview.path) or True, record=recorder.record)
+    llm = FakeLLM([
+        AssistantTurn(None, [
+            ToolCall("write-1", "write_file", {"path": "one.txt", "content": "1"}),
+            ToolCall("write-2", "write_file", {"path": "two.txt", "content": "2"}),
+        ]),
+        AssistantTurn("Both files were written.", []),
+    ])
+
+    answer = AgentLoop(llm, make_write_registry(sample_git_repo, gate), recorder=recorder).run(
+        "Write two files", Workspace(sample_git_repo)
+    )
+
+    assert answer == "Both files were written."
+    assert approvals == ["one.txt", "two.txt"]
+    assert (sample_git_repo / "one.txt").read_text(encoding="utf-8") == "1"
+    assert (sample_git_repo / "two.txt").read_text(encoding="utf-8") == "2"
