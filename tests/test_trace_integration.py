@@ -134,6 +134,23 @@ def test_trace_records_step_durations(sample_git_repo, tmp_path):
     )
 
 
+def test_trace_records_prompt_length_for_each_model_request(sample_git_repo, tmp_path):
+    recorder = RunRecorder.create("read", sample_git_repo, tmp_path / "runs")
+    llm = FakeLLM([AssistantTurn("Done", [])])
+
+    AgentLoop(llm, make_registry(sample_git_repo), recorder=recorder).run(
+        "read", Workspace(sample_git_repo)
+    )
+
+    requests = [
+        event
+        for event in json.loads(recorder.trace_path.read_text(encoding="utf-8"))["events"]
+        if event["type"] == "llm_request"
+    ]
+    assert len(requests) == 1
+    assert requests[0]["prompt_chars"] > 0
+
+
 def test_trace_records_tool_call_limit(sample_git_repo, tmp_path):
     recorder = RunRecorder.create("read", sample_git_repo, tmp_path / "runs")
     llm = FakeLLM(

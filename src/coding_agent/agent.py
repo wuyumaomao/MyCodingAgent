@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+import json
 import time
 from typing import Any
 
@@ -64,6 +65,7 @@ class AgentLoop:
                 "llm_request",
                 round=round_number,
                 message_count=len(messages),
+                prompt_chars=_prompt_chars(messages, tool_definitions),
                 report_payload={"messages": messages, "tools": tool_definitions},
             )
             request_started = time.perf_counter()
@@ -111,6 +113,12 @@ class AgentLoop:
 
 def _duration_ms(started: float) -> float:
     return round((time.perf_counter() - started) * 1000, 3)
+
+
+def _prompt_chars(messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> int:
+    """Count the serialized request context sent to the model."""
+    payload = {"messages": messages, "tools": tools}
+    return len(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
 
 
 class AgentService:

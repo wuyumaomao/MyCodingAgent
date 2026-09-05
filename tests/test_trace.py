@@ -57,3 +57,17 @@ def test_trace_uses_step_duration_without_span_timestamps(tmp_path):
     assert "started_at" not in event
     assert "ended_at" not in event
     assert all(item["type"] not in {"span_start", "span_end"} for item in recorder._document["events"])
+
+
+def test_llm_request_records_prompt_character_count(tmp_path):
+    recorder = RunRecorder.create("q", tmp_path / "repo", tmp_path / "runs")
+    recorder.record(
+        "llm_request",
+        round=1,
+        message_count=2,
+        prompt_chars=321,
+        report_payload={"messages": [], "tools": []},
+    )
+
+    event = json.loads(recorder.trace_path.read_text(encoding="utf-8"))["events"][-1]
+    assert event["prompt_chars"] == 321

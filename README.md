@@ -81,6 +81,15 @@ trace 会记录模型请求、工具调用、审批结果、工具结果、错�
 
 每次运行都会在同一个 run 目录生成两个文件：`trace.json` 保存简洁摘要，`report.json` 保存每轮完整 LLM 消息、工具定义、规范化模型响应和工具结果。report 仍会进行字段脱敏；如果读取的文件包含密钥等敏感文本，这些内容可能出现在报告中，请谨慎保存。
 
+可以使用链路检查脚本查看一次 run 的关键过程：
+
+```powershell
+uv run python scripts/inspect_run.py
+uv run python scripts/inspect_run.py .coding-agent/runs/<run-id>
+```
+
+脚本默认选择最新的完整 run，只输出事件顺序、工具、审批、成功/失败和耗时，不展开完整 prompt。每个 `llm_request` 事件还包含 `prompt_chars`，表示本轮发送给模型的 `messages` 与工具定义序列化后的字符数，可用来观察上下文长度随轮次的变化。
+
 ## 开发约定
 
 - 先明确目标和边界，再开始实现
