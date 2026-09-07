@@ -15,6 +15,9 @@ from .tools.listfiles import ListFilesTool
 from .tools.patchfile import PatchFileTool
 from .tools.readfile import ReadFileTool
 from .tools.registry import ToolRegistry
+from .tools.shell import ShellApprovalGate, ShellPreview, ShellTool
+from .tools.shell_policy import ShellPolicy
+from .tools.shell_runner import WindowsProcessRunner
 from .tools.writefile import WriteFileTool
 from .trace import RunRecorder
 
@@ -34,21 +37,31 @@ class CodingAgent:
         settings: Settings,
         *,
         approval_ask: Callable[[WritePreview], bool] | None = None,
+        shell_approval_ask: Callable[[ShellPreview], bool] | None = None,
         approval_record: Callable[..., None] | None = None,
         limits: AgentLimits | None = None,
         repository_context_builder: Callable[[Workspace], str] = build_repository_context,
         llm_client: Any | None = None,
         llm_client_factory: Callable[..., Any] | None = None,
+        shell_policy: ShellPolicy | None = None,
+        shell_runner: WindowsProcessRunner | None = None,
     ) -> "CodingAgent":
         repository = resolve_repository(Path(repo))
         workspace = Workspace(repository)
         registry = ToolRegistry()
         approval_gate = WriteApprovalGate(ask=approval_ask, record=approval_record)
+        shell_tool = ShellTool(
+            workspace,
+            policy=shell_policy,
+            approval_gate=ShellApprovalGate(ask=shell_approval_ask),
+            runner=shell_runner,
+        )#实例化各个工具并注册
         tools = [
             ListFilesTool(workspace),
             ReadFileTool(workspace),
             WriteFileTool(workspace, approval_gate),
             PatchFileTool(workspace, approval_gate),
+            shell_tool,
         ]
         for tool in tools:
             registry.register(

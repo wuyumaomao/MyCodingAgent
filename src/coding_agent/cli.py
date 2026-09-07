@@ -12,6 +12,8 @@ from .llm import LLMClient
 from .repository import RepositoryError, Workspace, resolve_repository
 from .trace import RunRecorder
 from .tools.approval import WriteApprovalGate, WritePreview
+from .tools.shell import ShellPreview
+from .tools.shell_policy import ShellPolicy
 
 
 RUNS_ROOT = Path(__file__).resolve().parents[2] / ".coding-agent" / "runs"
@@ -25,6 +27,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--base-url")
     parser.add_argument("--timeout", type=float)
     parser.add_argument("--max-tool-calls", type=int, default=3)
+    parser.add_argument("--shell-timeout", type=float, default=60.0)
     return parser
 
 
@@ -34,15 +37,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         args = _parser().parse_args(argv)
     except SystemExit as exc:
         return int(exc.code)
-    try:
+    try:#这里创建的是和本次运行相关和需要cli参数传入的
         repository = resolve_repository(args.repo)
         workspace = Workspace(repository)
         recorder = RunRecorder.create(" ".join(args.query), repository, RUNS_ROOT)
         settings = Settings.from_args_and_env(args)
-        agent = CodingAgent.from_settings(
+        shell_policy = ShellPolicy(default_timeout=args.shell_timeout)
+        agent = CodingAgent.from_settings(#工厂函数
             args.repo,
             settings,
             approval_ask=_ask_write_approval if sys.stdin.isatty() else None,
+            shell_approval_ask=_ask_shell_approval if sys.stdin.isatty() else None,
+            shell_policy=shell_policy,
             limits=AgentLimits(max_calls_per_tool=args.max_tool_calls),
             llm_client_factory=LLMClient,
         )
@@ -92,6 +98,18 @@ def _ask_write_approval(preview: WritePreview) -> bool:
         print(f"+ {_preview_text(preview.new_text or '')}", file=sys.stderr)
     try:
         answer = input("Approve this write? [y/N] ")
+    except (EOFError, KeyboardInterrupt):
+        return False
+    return answer.strip().lower() in {"y", "yes"}
+
+
+def _ask_shell_approval(preview: ShellPreview) -> bool:
+    print("\nShell command approval required", file=sys.stderr)
+    print(f"Command: {preview.command}", file=sys.stderr)
+    print(f"Working directory: {preview.cwd}", file=sys.stderr)
+    print(f"Timeout: {preview.timeout:g} seconds", file=sys.stderr)
+    try:
+        answer = input("Approve this command? [y/N] ")
     except (EOFError, KeyboardInterrupt):
         return False
     return answer.strip().lower() in {"y", "yes"}

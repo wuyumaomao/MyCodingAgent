@@ -4,7 +4,7 @@
 
 ## 项目状态
 
-项目处于受控写入 MVP 阶段，当前支持通过 CLI 读取、解释和在用户批准后修改本地 Git 仓库。
+项目处于受控操作 MVP 阶段，当前支持通过 CLI 读取、解释、在用户批准后修改本地 Git 仓库，以及运行受限的测试和脚本命令。
 
 ## 项目目标
 
@@ -47,16 +47,21 @@ coding-agent "package.json 里有哪些可用命令" --repo .
 
 每个工具默认最多调用 3 次；需要调整时可使用 `--max-tool-calls 5`。超过限制后，Agent 会收到结构化错误并决定结束或改用其他工具。
 
-当前提供四个文件工具：
+当前提供四个文件工具和一个受控命令工具：
 
 - `listfiles`：列出仓库中的文件和目录。
 - `readfile`：读取 UTF-8 文本文件。
 - `write_file`：创建文件或整体覆盖已有文件。
 - `patch_file`：精确替换已有文件中唯一匹配的一段文本。
+- `shell`：在批准后运行白名单中的仓库命令。
 
 `write_file` 和 `patch_file` 都是高风险工具。模型提出调用后，CLI 会逐次显示仓库相对路径和受限预览；仅输入 `y` 或 `yes` 才会写入。覆盖已有文件会显示明确警告。无交互输入时，写工具返回 `approval_required`，不会修改文件。
 
 写入只允许发生在仓库工作区内。解析后仍在工作区内的绝对路径或 `..` 路径可以使用；逃逸工作区、经过符号链接、父目录不存在或超过 64 KiB 的写入会被拒绝。写入通过同目录临时文件和原子替换完成，替换失败时保留原文件。
+
+`shell` 同样是高风险工具。可以用自然语言要求 Agent 运行脚本或测试，例如“运行 `tools/repo_stats.py`”或“执行 `pytest tests/test_cli.py -q`”；也可以在请求中写出完整命令。Agent 会生成结构化的 `program + args` 调用，CLI 显示实际命令、仓库相对工作目录和超时，只有输入 `y` 或 `yes` 才会启动进程。无交互输入时返回 `approval_required`。
+
+第一版只允许 `python`、`pytest`、`git`、`npm`：Python 只能运行工作区内的 `.py` 脚本；Git 只允许 `status`、`diff`、`log`、`show`、`branch`、`rev-parse`；npm 只允许 `npm test` 与 `npm run <script>`。不支持任意 CMD/PowerShell 字符串、管道、重定向、命令连接、后台进程、依赖安装、提交或推送。默认超时为 60 秒，可用 `--shell-timeout` 调整到最多 300 秒；stdout 与 stderr 各最多保留 64 KiB，超时会终止 Windows 进程树。
 
 工具调用的校验顺序是：`ResponseParser -> 工具查找 -> JSON Schema -> 工具安全检查 -> 执行`。模型返回的 arguments 先按注册时提供的 JSON Schema 在客户端校验；缺少必填字段、类型错误、数值越界或包含不允许的额外字段时，不会调用工具，而是把 `invalid_tool_arguments` 作为结构化 `role: tool` 结果回传给模型。Schema 只负责参数结构，工作区边界、文件存在性、权限和编码等运行时安全检查仍由具体工具负责。Provider 支持的 `strict` schema 只是额外约束，不能替代客户端校验。
 

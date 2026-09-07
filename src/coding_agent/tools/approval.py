@@ -25,6 +25,13 @@ def event_sink_context(sink: object) -> Iterator[None]:
         _current_event_sink.reset(token)
 
 
+def emit_current_event(event_type: str, **payload: object) -> None:
+    """Emit an event to the sink bound to the currently executing tool."""
+    sink = _current_event_sink.get()
+    if sink is not None:
+        sink.emit(event_type, **payload)  # type: ignore[attr-defined]
+
+
 @dataclass(frozen=True)
 class WritePreview:
     """The information shown to a user before a write is performed."""
@@ -75,9 +82,8 @@ class WriteApprovalGate:
         return decision
 
     def _emit(self, event_type: str, **payload: object) -> None:
-        sink = _current_event_sink.get()
-        if sink is not None:
-            sink.emit(event_type, **payload)  # type: ignore[attr-defined]
+        if _current_event_sink.get() is not None:
+            emit_current_event(event_type, **payload)
             return
         if self._record is not None:
             self._record(event_type, **payload)

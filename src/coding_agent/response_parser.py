@@ -16,7 +16,7 @@ class LLMResponseError(RuntimeError):
 
 
 @dataclass(frozen=True)
-class ParsedResponse(AssistantTurn):
+class ParsedResponse(AssistantTurn):#ParsedResponse继承AssistantTurn
     kind: Literal["final", "tool_call"] = "final"
     finish_reason: str = "stop"
 
@@ -33,8 +33,8 @@ class ResponseParser:
 
         raw_tool_calls = getattr(message, "tool_calls", None) or []
         tool_calls = [self._parse_tool_call(call) for call in raw_tool_calls]
-        finish_reason = getattr(choice, "finish_reason", None)
-        if finish_reason is None:
+        finish_reason = getattr(choice, "finish_reason", None)#去拿finishreason
+        if finish_reason is None:#没有finishreason且没有toolcall就是结束
             # Some OpenAI-compatible providers omit this metadata.
             finish_reason = "tool_calls" if tool_calls else "stop"
 

@@ -7,6 +7,8 @@ from coding_agent.cli import main
 from coding_agent.config import Settings
 from coding_agent.models import AssistantTurn, ToolCall
 from coding_agent.tools.approval import WritePreview
+from coding_agent.tools.shell import ShellPreview
+from coding_agent.tools.shell_runner import ShellRunResult
 
 
 class FakeClient:
@@ -199,6 +201,74 @@ def test_ask_write_approval_accepts_only_yes(monkeypatch, sample_git_repo):
 
     monkeypatch.setattr("builtins.input", lambda _: "yes please")
     assert _ask_write_approval(WritePreview("create", "new.py", content="hello")) is False
+
+
+def test_cli_shell_approval_accepts_only_yes(monkeypatch):
+    from coding_agent.cli import _ask_shell_approval
+
+    monkeypatch.setattr("builtins.input", lambda _: "yes")
+    assert _ask_shell_approval(ShellPreview("git", ["status"], ".", 60)) is True
+    monkeypatch.setattr("builtins.input", lambda _: "no")
+    assert _ask_shell_approval(ShellPreview("git", ["status"], ".", 60)) is False
+
+
+def test_cli_passes_shell_timeout_to_policy(monkeypatch, sample_git_repo, tmp_path):
+    monkeypatch.setenv("CODING_AGENT_API_KEY", "test-key")
+    monkeypatch.setenv("CODING_AGENT_MODEL", "test-model")
+    monkeypatch.setattr("coding_agent.cli.RUNS_ROOT", tmp_path / "runs")
+    captured = {}
+
+    class Agent:
+        def ask(self, query, *, recorder):
+            return "ok"
+
+    def create_agent(repo, settings, **kwargs):
+        captured.update(kwargs)
+        return Agent()
+
+    monkeypatch.setattr("coding_agent.cli.CodingAgent.from_settings", create_agent)
+    assert main(["status", "--shell-timeout", "12", "--repo", str(sample_git_repo)]) == 0
+    assert captured["shell_policy"].default_timeout == 12.0
+
+
+def test_cli_shell_command_runs_after_approval(monkeypatch, sample_git_repo, tmp_path, capsys):
+    monkeypatch.setenv("CODING_AGENT_API_KEY", "test-key")
+    monkeypatch.setenv("CODING_AGENT_MODEL", "test-model")
+    monkeypatch.setattr("coding_agent.cli.RUNS_ROOT", tmp_path / "runs")
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _: "y")
+    client = FakeClient([
+        AssistantTurn(None, [ToolCall("shell-1", "shell", {"program": "git", "args": ["status"]})]),
+        AssistantTurn("checked", []),
+    ])
+    calls = []
+
+    class Runner:
+        def run(self, request, workspace, max_output_bytes):
+            calls.append(request)
+            return ShellRunResult(0, "clean", "", False, False, 1.0)
+
+    monkeypatch.setattr("coding_agent.cli.LLMClient", lambda **kwargs: client)
+    monkeypatch.setattr("coding_agent.tools.shell.WindowsProcessRunner", Runner)
+    assert main(["check", "--repo", str(sample_git_repo)]) == 0
+    assert capsys.readouterr().out.strip() == "checked"
+    assert len(calls) == 1
+    assert "exit_code" in client.messages[-1][-1]["content"]
+
+
+def test_cli_shell_command_is_rejected_without_tty(monkeypatch, sample_git_repo, tmp_path, capsys):
+    monkeypatch.setenv("CODING_AGENT_API_KEY", "test-key")
+    monkeypatch.setenv("CODING_AGENT_MODEL", "test-model")
+    monkeypatch.setattr("coding_agent.cli.RUNS_ROOT", tmp_path / "runs")
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    client = FakeClient([
+        AssistantTurn(None, [ToolCall("shell-1", "shell", {"program": "git", "args": ["status"]})]),
+        AssistantTurn("approval needed", []),
+    ])
+    monkeypatch.setattr("coding_agent.cli.LLMClient", lambda **kwargs: client)
+    assert main(["check", "--repo", str(sample_git_repo)]) == 0
+    assert capsys.readouterr().out.strip() == "approval needed"
+    assert "approval_required" in client.messages[-1][-1]["content"]
 
 
 def test_cli_write_tool_requires_approval_and_can_write(monkeypatch, sample_git_repo, tmp_path):
