@@ -64,6 +64,9 @@ class ToolExecutor:
             id=call.id,
             name=call.name,
             ok=execution.result.get("ok"),
+            error_type=(execution.result.get("error") or {}).get("type")
+            if isinstance(execution.result.get("error"), dict)
+            else None,
             duration_ms=execution.duration_ms,
             report_payload={"result": execution.result},
         )

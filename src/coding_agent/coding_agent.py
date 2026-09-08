@@ -47,6 +47,7 @@ class CodingAgent:
         llm_client_factory: Callable[..., Any] | None = None,
         shell_policy: ShellPolicy | None = None,
         shell_runner: WindowsProcessRunner | None = None,
+        allowed_tools: set[str] | frozenset[str] | None = None,
     ) -> "CodingAgent":
         repository = resolve_repository(Path(repo))
         workspace = Workspace(repository)
@@ -68,6 +69,8 @@ class CodingAgent:
             shell_tool,
         ]
         for tool in tools:
+            if allowed_tools is not None and tool.name not in allowed_tools:
+                continue
             registry.register(
                 tool.name,
                 tool.execute,

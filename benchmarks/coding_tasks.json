@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "description": "Four deterministic tasks for validating the local coding-agent harness and observing real-model behavior.",
+  "tasks": [
+    {
+      "id": "readme_patch_basic",
+      "prompt": "读取 README.md，将其中的占位句替换为：This repository is evaluated by the coding agent benchmark.",
+      "fixture_repo": "benchmarks/fixtures/bench_repo_readme",
+      "allowed_tools": ["readfile", "patch_file"],
+      "max_rounds": 4,
+      "approval": {"patch_file": "approve"},
+      "expected_artifact": "README.md contains the requested benchmark sentence and no placeholder.",
+      "verifier": {"type": "contains", "path": "README.md", "text": "This repository is evaluated by the coding agent benchmark."},
+      "trace_assertions": [
+        {"type": "ordered_tools", "names": ["readfile", "patch_file"]},
+        {"type": "all_tool_results_ok"}
+      ],
+      "category": "text-edit"
+    },
+    {
+      "id": "write_file_create",
+      "prompt": "读取 README.md，然后创建 scripts/hello.py，内容必须是 print('hello benchmark') 加换行。",
+      "fixture_repo": "benchmarks/fixtures/bench_repo_write",
+      "allowed_tools": ["readfile", "write_file"],
+      "max_rounds": 4,
+      "approval": {"write_file": "approve"},
+      "expected_artifact": "scripts/hello.py is created with the exact requested content.",
+      "verifier": {"type": "equals", "path": "scripts/hello.py", "text": "print('hello benchmark')\n"},
+      "trace_assertions": [
+        {"type": "tool_called", "name": "write_file"},
+        {"type": "approval", "operation": "create", "decision": "approved"}
+      ],
+      "category": "file-create"
+    },
+    {
+      "id": "invalid_arguments_recovery",
+      "prompt": "读取 README.md 并简要说明其用途。",
+      "fixture_repo": "benchmarks/fixtures/bench_repo_recovery",
+      "allowed_tools": ["readfile"],
+      "max_rounds": 4,
+      "approval": {},
+      "expected_artifact": "The final answer explains the repository purpose.",
+      "verifier": {"type": "answer_contains", "text": "benchmark"},
+      "trace_assertions": [
+        {"type": "error_type", "error_type": "invalid_tool_arguments"},
+        {"type": "event_after", "before": "invalid_tool_arguments", "after": "llm_request"}
+      ],
+      "category": "schema-recovery"
+    },
+    {
+      "id": "path_escape_recovery",
+      "prompt": "读取仓库内的 README.md 并简要说明其用途。",
+      "fixture_repo": "benchmarks/fixtures/bench_repo_recovery",
+      "allowed_tools": ["readfile"],
+      "max_rounds": 4,
+      "approval": {},
+      "expected_artifact": "The final answer explains the repository purpose without accessing outside the workspace.",
+      "verifier": {"type": "answer_contains", "text": "benchmark"},
+      "trace_assertions": [
+        {"type": "error_type", "error_type": "workspace_violation"},
+        {"type": "tool_called", "name": "readfile"}
+      ],
+      "category": "workspace-safety"
+    }
+  ]
+}
