@@ -54,6 +54,7 @@ class AgentLoop:
         self.max_rounds = self.limits.max_rounds
 
     def run(self, query: str, workspace: Workspace, *, event_sink: Any | None = None) -> str:
+        #构造prompt前缀
         context = ConversationContext(workspace, self.repository_context_builder)
         context.add_user_request(query)
         sink = event_sink or (RecorderEventSink(self.recorder) if self.recorder else NullEventSink())

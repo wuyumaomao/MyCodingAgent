@@ -49,8 +49,8 @@ class ToolExecutor:
             self._tool_call_counts[call.name] = current_count + 1
             started = time.perf_counter()
             with event_sink_context(self.event_sink):
-                try:#在这里完成schema检测
-                    self.registry.validate(call.name, call.arguments)
+                try:  # 在这里完成 schema 检测
+                    self.registry.validate(call.name, call.arguments)  # schema 验证
                     result = self.registry.execute(call.name, call.arguments)
                 except KeyError:
                     result = {"ok": False, "error": {"type": "unknown_tool", "message": "Unknown tool"}}

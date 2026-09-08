@@ -51,5 +51,6 @@ class LLMClient:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
     ) -> ParsedResponse:
+        #拿到模型原生返回
         response = self._request(messages, tools)
         return self.response_parser.parse(response)

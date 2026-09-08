@@ -46,7 +46,7 @@ class ResponseParser:
             raise LLMResponseError("finish_reason indicates tool calls, but none were returned")
         if finish_reason == "stop" and tool_calls:
             raise LLMResponseError("finish_reason is stop, but tool calls were returned")
-
+        #模型拿到的返回结构化结果
         return ParsedResponse(
             content=getattr(message, "content", None),
             tool_calls=tool_calls,
