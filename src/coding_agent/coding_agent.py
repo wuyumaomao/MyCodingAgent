@@ -12,8 +12,10 @@ from .llm import LLMClient
 from .repository import Workspace, resolve_repository
 from .tools.approval import WriteApprovalGate, WritePreview
 from .tools.listfiles import ListFilesTool
+from .tools.find_files import FindFilesTool
 from .tools.patchfile import PatchFileTool
 from .tools.readfile import ReadFileTool
+from .tools.search import SearchTool
 from .tools.registry import ToolRegistry
 from .tools.shell import ShellApprovalGate, ShellPreview, ShellTool
 from .tools.shell_policy import ShellPolicy
@@ -59,6 +61,8 @@ class CodingAgent:
         tools = [
             ListFilesTool(workspace),
             ReadFileTool(workspace),
+            SearchTool(workspace),
+            FindFilesTool(workspace),
             WriteFileTool(workspace, approval_gate),
             PatchFileTool(workspace, approval_gate),
             shell_tool,

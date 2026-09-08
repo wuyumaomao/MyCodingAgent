@@ -41,7 +41,7 @@ def test_from_settings_builds_reusable_agent_without_trace(monkeypatch, sample_g
     assert agent.ask("inspect") == "first"
     assert agent.ask("again") == "second"
     assert {definition["function"]["name"] for definition in agent.registry.definitions()} == {
-        "listfiles", "readfile", "write_file", "patch_file", "shell"
+        "listfiles", "readfile", "search", "find_files", "write_file", "patch_file", "shell"
     }
 
 
