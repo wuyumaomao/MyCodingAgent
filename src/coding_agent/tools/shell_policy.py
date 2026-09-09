@@ -8,7 +8,7 @@ from typing import Any
 from ..repository import Workspace, WorkspaceViolation
 
 
-_ALLOWED_PROGRAMS = frozenset({"python", "pytest", "git", "npm"})
+_ALLOWED_PROGRAMS = frozenset({"python", "pytest", "git", "npm", "uv"})
 _READ_ONLY_GIT_COMMANDS = frozenset({"status", "diff", "log", "show", "branch", "rev-parse"})
 _UNSAFE_TOKENS = frozenset({"&", "|", ";", "<", ">", "`", "\r", "\n"})
 _NESTED_SHELL_NAMES = frozenset({"cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh", "pwsh.exe"})
@@ -116,6 +116,18 @@ class ShellPolicy:
                 raise ShellPolicyError("subcommand_not_allowed", "The requested npm subcommand is not allowed")
             if args[0].lower() == "run" and (len(args) != 2 or not args[1] or args[1].startswith("-")):
                 raise ShellPolicyError("invalid_arguments", "npm run requires one script name")
+            return
+        if program == "uv":
+            if args == ["sync", "--dev"]:
+                return
+            if len(args) >= 2 and args[0] == "run":
+                script_index = 1
+                script = args[script_index]
+                if script.startswith("-") or not script.lower().endswith(".py"):
+                    raise ShellPolicyError("subcommand_not_allowed", "uv run may only execute a workspace Python script")
+                self._workspace_path(workspace, script, "script_not_found", must_exist=True, must_be_file=True)
+                return
+            raise ShellPolicyError("subcommand_not_allowed", "Only 'uv sync --dev' or 'uv run <script.py>' is allowed")
 
     @staticmethod
     def _workspace_path(

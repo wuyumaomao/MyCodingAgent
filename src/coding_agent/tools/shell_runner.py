@@ -12,6 +12,7 @@ from typing import Any, Callable
 
 from ..repository import Workspace
 from .shell_policy import ValidatedShellRequest
+from .target_environment import resolve_target_python, target_venv_bin, target_venv_dir
 
 
 @dataclass(frozen=True)
@@ -49,8 +50,8 @@ class WindowsProcessRunner:
         workspace: Workspace,
         max_output_bytes: int,
     ) -> ShellRunResult:
-        command = self._command(request)
-        environment = _safe_environment()
+        command = self._command(request, workspace)
+        environment = _safe_environment(workspace)
         started = time.perf_counter()
         try:
             process = self._popen(
@@ -99,13 +100,22 @@ class WindowsProcessRunner:
         )
 
     @staticmethod
-    def _command(request: ValidatedShellRequest) -> list[str]:
+    def _command(request: ValidatedShellRequest, workspace: Workspace | None = None) -> list[str]:
+        return WindowsProcessRunner._command_for_workspace(request, workspace)
+
+    @staticmethod
+    def _command_for_workspace(request: ValidatedShellRequest, workspace: Workspace | None) -> list[str]:
         if request.program == "python":
-            return [sys.executable, *request.args]
+            executable = resolve_target_python(workspace) if workspace is not None else None
+            return [str(executable or sys.executable), *request.args]
         if request.program == "pytest":
-            return [sys.executable, "-m", "pytest", *request.args]
+            executable = resolve_target_python(workspace) if workspace is not None else None
+            return [str(executable or sys.executable), "-m", "pytest", *request.args]
         if request.program == "npm":
             executable = shutil.which("npm.cmd") or "npm.cmd"
+            return [executable, *request.args]
+        if request.program == "uv":
+            executable = shutil.which("uv.exe") or shutil.which("uv") or ("uv.exe" if os.name == "nt" else "uv")
             return [executable, *request.args]
         executable = shutil.which("git.exe") or shutil.which("git") or "git.exe"
         return [executable, *request.args]
@@ -123,13 +133,20 @@ class WindowsProcessRunner:
             pass
 
 
-def _safe_environment() -> dict[str, str]:
-    return {
+def _safe_environment(workspace: Workspace | None = None) -> dict[str, str]:
+    environment = {
         key: value
         for key, value in os.environ.items()
         if key.upper() not in {"CODING_AGENT_API_KEY", "OPENAI_API_KEY"}
         and not any(marker in key.upper() for marker in ("AUTHORIZATION", "TOKEN", "SECRET"))
     }
+    if workspace is not None:
+        venv = target_venv_dir(workspace)
+        venv_bin = target_venv_bin(workspace)
+        if venv_bin is not None:
+            environment["PATH"] = str(venv_bin) + os.pathsep + environment.get("PATH", "")
+            environment["VIRTUAL_ENV"] = str(venv)
+    return environment
 
 
 class _OutputBuffer:

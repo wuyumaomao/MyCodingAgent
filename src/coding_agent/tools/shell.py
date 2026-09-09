@@ -64,7 +64,7 @@ class ShellTool:
     parameters = {
         "type": "object",
         "properties": {
-            "program": {"type": "string", "enum": ["python", "pytest", "git", "npm"]},
+            "program": {"type": "string", "enum": ["python", "pytest", "git", "npm", "uv"]},
             "args": {"type": "array", "items": {"type": "string"}},
             "cwd": {"type": "string"},
             "timeout": {"type": "number", "exclusiveMinimum": 0, "maximum": 300},

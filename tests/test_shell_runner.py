@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import os
 from io import BytesIO
 
 from coding_agent.repository import Workspace
@@ -109,3 +110,53 @@ def test_runner_removes_sensitive_environment_variables(monkeypatch, sample_git_
     WindowsProcessRunner(popen_factory=popen).run(request(), Workspace(sample_git_repo), 1024)
     assert "CODING_AGENT_API_KEY" not in captured["env"]
     assert captured["env"]["SAFE_VALUE"] == "ok"
+
+
+def test_runner_uses_target_venv_python_and_environment(sample_git_repo):
+    target_python = sample_git_repo / ".venv" / "Scripts" / "python.exe"
+    target_python.parent.mkdir(parents=True)
+    target_python.write_bytes(b"")
+    captured = {}
+    process = FakeProcess()
+
+    def popen(command, **kwargs):
+        captured["command"] = command
+        captured["env"] = kwargs["env"]
+        return process
+
+    WindowsProcessRunner(popen_factory=popen).run(request(), Workspace(sample_git_repo), 1024)
+    assert captured["command"] == [str(target_python), "script.py"]
+    assert captured["env"]["VIRTUAL_ENV"] == str(sample_git_repo / ".venv")
+    assert captured["env"]["PATH"].split(os.pathsep)[0] == str(target_python.parent)
+
+
+def test_runner_uses_target_venv_for_pytest(sample_git_repo):
+    target_python = sample_git_repo / ".venv" / "Scripts" / "python.exe"
+    target_python.parent.mkdir(parents=True)
+    target_python.write_bytes(b"")
+    captured = {}
+    process = FakeProcess()
+
+    def popen(command, **kwargs):
+        captured["command"] = command
+        return process
+
+    WindowsProcessRunner(popen_factory=popen).run(
+        request(program="pytest", args=["tests"]), Workspace(sample_git_repo), 1024
+    )
+    assert captured["command"] == [str(target_python), "-m", "pytest", "tests"]
+
+
+def test_runner_executes_uv_from_system_path(sample_git_repo, monkeypatch):
+    captured = {}
+    process = FakeProcess()
+    monkeypatch.setattr("coding_agent.tools.shell_runner.shutil.which", lambda name: "C:/bin/uv.exe" if name == "uv.exe" else None)
+
+    def popen(command, **kwargs):
+        captured["command"] = command
+        return process
+
+    WindowsProcessRunner(popen_factory=popen).run(
+        request(program="uv", args=["sync", "--dev"]), Workspace(sample_git_repo), 1024
+    )
+    assert captured["command"] == ["C:/bin/uv.exe", "sync", "--dev"]

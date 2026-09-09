@@ -2,9 +2,9 @@
 
 ## 文档状态
 
-- 状态：待实现
-- 版本：v0.1
-- 日期：2026-09-05
+- 状态：实现中（运行时环境扩展已确认）
+- 版本：v0.2
+- 日期：2026-09-09
 - 基础能力：CodingAgent、ToolExecutor、逐调用审批、trace/report
 - 平台：Windows 10/11，Python 3.11+
 
@@ -19,7 +19,10 @@
 ### 2.1 必须实现
 
 - 新增 `shell` 工具，输入是 `program`、`args`、`cwd` 和可选 `timeout`，不接受任意命令字符串。
-- 第一版程序白名单只有 `python`、`pytest`、`git`、`npm`。
+- 第一版程序白名单为 `python`、`pytest`、`git`、`npm` 和受控的 `uv`。
+- `uv` 第一阶段只允许 `uv sync --dev` 或 `uv run <工作区内的 .py 脚本> [参数]`，每次调用都必须经过用户审批；其他 `uv` 子命令继续拒绝。
+- `python` 和 `pytest` 动态优先使用目标仓库 `.venv` 的解释器；不存在时才回退 Agent 进程解释器。
+- 目标 `.venv` 的 `Scripts`/`bin` 放在子进程 `PATH` 首位并设置 `VIRTUAL_ENV`，不切换 Agent 主进程环境。
 - 每次 shell 调用单独审批；没有审批回调时返回 `approval_required`，不得启动进程。
 - 默认使用 `shell=False` 的 Windows 进程启动方式，不通过 `cmd /c` 或 `powershell -Command` 拼接字符串。
 - 工作目录、Python 脚本路径、pytest 路径和 Git 路径参数解析后必须位于 `Workspace.root` 内。
@@ -39,7 +42,7 @@
 
 - 不支持任意 PowerShell/CMD 字符串、命令链、管道、重定向或后台任务。
 - 不支持 `cmd.exe`、`powershell.exe`、`pwsh.exe` 作为白名单程序。
-- 不支持安装依赖、网络下载、发布包、自动提交、推送或创建 Pull Request。
+- 不支持除 `uv sync --dev` 外的安装依赖、网络下载、发布包、自动提交、推送或创建 Pull Request。
 - 不支持跨多个命令的事务回滚。
 - 不支持跨 ask 生命周期的 shell 进程、会话或终端状态持久化。
 - 不实现命令白名单的配置文件热加载；白名单由代码中的 `ShellPolicy` 固定定义。
@@ -102,7 +105,7 @@
 
 ```text
 CodingAgent.from_settings()
-    └── ShellPolicy + ShellTool + WindowsProcessRunner
+    └── ShellPolicy + ShellTool + WindowsProcessRunner + TargetPythonResolver
 
 AgentLoop.run()
     └── ToolExecutor
@@ -138,6 +141,10 @@ class ShellPolicy:
 ### 4.4 Agent 与 CLI
 
 `CodingAgent.from_settings()` 装配一个可复用的 `ShellTool`。每次 `ask()` 仍由 `ToolExecutor` 创建本次调用计数和事件边界；Shell 审批事件必须写入当前 ask 的 recorder。CLI 保留一次运行的 recorder 和审批回调，只增加 shell 审批预览，不把 recorder 绑定到静态工具。
+
+### 4.5 目标项目运行时
+
+执行 `python` 或 `pytest` 前，runner 根据当前 `cwd` 所在目标 workspace 动态检查 `.venv`：Windows 使用 `.venv\\Scripts\\python.exe`，Unix 使用 `.venv/bin/python`。检查不到时暂时使用 Agent 的 `sys.executable`，并在上下文中提示可通过审批执行 `uv sync --dev`。同步命令在目标 workspace 中运行；命令完成后后续调用会重新发现新创建的解释器。目标环境依赖不完整导致 Python/pytest 失败时，错误结果回传模型，由模型请求批准同步后再重试。
 
 ## 5. 错误类型
 

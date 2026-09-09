@@ -75,3 +75,35 @@ def test_rejects_missing_cwd(sample_git_repo):
     with pytest.raises(ShellPolicyError) as raised:
         ShellPolicy().validate(ShellRequest("git", ["status"], cwd="missing"), policy_workspace(sample_git_repo))
     assert raised.value.error_type == "cwd_not_found"
+
+
+def test_allows_uv_sync_dev(sample_git_repo):
+    validated = ShellPolicy().validate(
+        ShellRequest("uv", ["sync", "--dev"]), policy_workspace(sample_git_repo)
+    )
+    assert validated.program == "uv"
+    assert validated.args == ["sync", "--dev"]
+
+
+def test_rejects_other_uv_commands(sample_git_repo):
+    for arguments in (["add", "pytest"], ["pip", "install", "pytest"], ["sync"]):
+        with pytest.raises(ShellPolicyError) as raised:
+            ShellPolicy().validate(ShellRequest("uv", list(arguments)), policy_workspace(sample_git_repo))
+        assert raised.value.error_type == "subcommand_not_allowed"
+
+
+def test_allows_uv_run_workspace_script(sample_git_repo):
+    script = sample_git_repo / "scripts" / "check.py"
+    script.parent.mkdir(exist_ok=True)
+    script.write_text("print('ok')\n", encoding="utf-8")
+    validated = ShellPolicy().validate(
+        ShellRequest("uv", ["run", "scripts/check.py", "--verbose"]), policy_workspace(sample_git_repo)
+    )
+    assert validated.args == ["run", "scripts/check.py", "--verbose"]
+
+
+def test_rejects_unsafe_uv_run_targets(sample_git_repo):
+    for arguments in (["run", "python", "-c", "print(1)"], ["run", "powershell", "x"], ["run"]):
+        with pytest.raises(ShellPolicyError) as raised:
+            ShellPolicy().validate(ShellRequest("uv", list(arguments)), policy_workspace(sample_git_repo))
+        assert raised.value.error_type in {"subcommand_not_allowed", "unsafe_argument"}

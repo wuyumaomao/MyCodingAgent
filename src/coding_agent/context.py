@@ -9,11 +9,14 @@ from typing import Any, Callable
 from .filesystem import FileEntry, scan_files
 from .models import AssistantTurn, ToolCall
 from .repository import Workspace
+from .tools.target_environment import resolve_target_python, target_venv_dir
 
 
 SYSTEM_PROMPT = (
     "You are a  coding agent. Use only the provided tools, "
-    "stay inside the repository workspace, and explain findings based on evidence."
+    "stay inside the repository workspace, and explain findings based on evidence. "
+    "If python or pytest fails because target dependencies are missing, request approval "
+    "to run uv sync --dev, then retry the command."
 )
 
 IMPORTANT_FILE_MAX_BYTES = 12 * 1024
@@ -102,7 +105,18 @@ def build_repository_context(
     lines.append(f"truncated: {str(truncated).lower()}")
     lines.extend(_important_files_context(workspace, entries))
     lines.extend(_git_status_context(workspace))
+    lines.extend(_runtime_context(workspace))
     return "\n".join(lines)
+
+
+def _runtime_context(workspace: Workspace) -> list[str]:
+    venv = target_venv_dir(workspace)
+    python = resolve_target_python(workspace)
+    lines = ["", "[Runtime Environment]"]
+    lines.append(f"target_venv: {'present' if venv.is_dir() else 'missing'}")
+    lines.append(f"target_python: {python.relative_to(workspace.root).as_posix() if python else 'unavailable'}")
+    lines.append("dependency_sync: approve 'uv sync --dev' when target dependencies are missing")
+    return lines
 
 
 def _important_files_context(workspace: Workspace, entries: list[FileEntry]) -> list[str]:

@@ -85,3 +85,13 @@ def test_context_messages_does_not_expose_internal_message_dicts(sample_git_repo
     messages = context.messages()
     messages[0]["content"] = "changed"
     assert context.messages()[0]["content"] != "changed"
+
+
+def test_repository_context_reports_target_python_environment(sample_git_repo):
+    venv_python = sample_git_repo / ".venv" / "Scripts" / "python.exe"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.write_bytes(b"")
+    context = build_repository_context(Workspace(sample_git_repo))
+    assert "[Runtime Environment]" in context
+    assert "target_venv: present" in context
+    assert "uv sync --dev" in context

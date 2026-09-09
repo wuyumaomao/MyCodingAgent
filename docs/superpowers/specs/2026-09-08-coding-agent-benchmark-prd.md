@@ -54,6 +54,7 @@
 | `write_file` | 审批后创建或覆盖文件 |
 | `patch_file` | 审批后精确替换唯一文本 |
 | `shell` | 审批后执行白名单 Python、pytest、git、npm 命令 |
+| 目标运行时 | 目标 `.venv` 解释器发现；批准后执行 `uv sync --dev` 并重试 |
 | Schema 校验 | 错误参数不执行工具并回传 `invalid_tool_arguments` |
 | 工作区安全 | 越界路径、符号链接和非法命令被拒绝 |
 | trace/report | 记录请求、工具、审批、结果、错误和耗时 |
