@@ -68,9 +68,9 @@ coding-agent "package.json 里有哪些可用命令" --repo .
 
 写入只允许发生在仓库工作区内。解析后仍在工作区内的绝对路径或 `..` 路径可以使用；逃逸工作区、经过符号链接、父目录不存在或超过 64 KiB 的写入会被拒绝。写入通过同目录临时文件和原子替换完成，替换失败时保留原文件。
 
-`shell` 同样是高风险工具。可以用自然语言要求 Agent 运行脚本或测试，例如“运行 `tools/repo_stats.py`”或“执行 `pytest tests/test_cli.py -q`”；也可以在请求中写出完整命令。Agent 会生成结构化的 `program + args` 调用，CLI 显示实际命令、仓库相对工作目录和超时，只有输入 `y` 或 `yes` 才会启动进程。无交互输入时返回 `approval_required`。
+`shell` 是受策略控制的命令工具。可以用自然语言要求 Agent 运行脚本或测试，例如“运行 `tools/repo_stats.py`”或“执行 `pytest tests/test_cli.py -q`”；也可以在请求中写出完整命令。只读 Git 查询（`status`、`diff`、`log`、`show`、`branch`、`rev-parse`）验证通过后自动执行，不打断用户；Python、pytest、npm 和 uv 命令仍会显示实际命令、仓库相对工作目录和超时，只有输入 `y` 或 `yes` 才会启动进程。无交互输入时返回 `approval_required`。
 
-第一版只允许 `python`、`pytest`、`git`、`npm` 和受控的 `uv`：Python 只能运行工作区内的 `.py` 脚本；Git 只允许 `status`、`diff`、`log`、`show`、`branch`、`rev-parse`；npm 只允许 `npm test` 与 `npm run <script>`；uv 只允许 `uv sync --dev` 或 `uv run <工作区内的 .py 脚本> [参数]`。目标仓库存在 `.venv` 时，Python/pytest 会优先使用目标解释器；环境缺失或依赖不完整时，Agent 可以请求批准后运行 `uv sync --dev`，完成后自动使用新环境。不支持任意 CMD/PowerShell 字符串、管道、重定向、命令连接、后台进程、其他 uv 命令、提交或推送。默认超时为 60 秒，可用 `--shell-timeout` 调整到最多 300 秒；stdout 与 stderr 各最多保留 64 KiB，超时会终止 Windows 进程树。
+第一版只允许 `python`、`pytest`、`git`、`npm` 和受控的 `uv`：Python 只能运行工作区内的 `.py` 脚本；Git 只允许 `status`、`diff`、`log`、`show`、`branch`、`rev-parse`，这些只读查询自动放行；npm 只允许 `npm test` 与 `npm run <script>`；uv 只允许 `uv sync --dev`、`uv run pytest [参数]`、`uv run python <工作区内的 .py 脚本> [参数]` 或兼容的 `uv run <工作区内的 .py 脚本> [参数]`，后几类仍需审批。目标仓库存在 `.venv` 时，Python/pytest 会优先使用目标解释器；环境缺失或依赖不完整时，Agent 可以请求批准后运行 `uv sync --dev`，完成后自动使用新环境。不支持任意 CMD/PowerShell 字符串、管道、重定向、命令连接、后台进程、其他 uv 命令、提交或推送。默认超时为 60 秒，可用 `--shell-timeout` 调整到最多 300 秒；stdout 与 stderr 各最多保留 64 KiB，超时会终止 Windows 进程树。
 
 工具调用的校验顺序是：`ResponseParser -> 工具查找 -> JSON Schema -> 工具安全检查 -> 执行`。模型返回的 arguments 先按注册时提供的 JSON Schema 在客户端校验；缺少必填字段、类型错误、数值越界或包含不允许的额外字段时，不会调用工具，而是把 `invalid_tool_arguments` 作为结构化 `role: tool` 结果回传给模型。Schema 只负责参数结构，工作区边界、文件存在性、权限和编码等运行时安全检查仍由具体工具负责。Provider 支持的 `strict` schema 只是额外约束，不能替代客户端校验。
 

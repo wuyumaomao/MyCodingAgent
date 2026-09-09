@@ -12,15 +12,17 @@
 
 ## Global Constraints
 
-- 只允许程序白名单：`python`、`pytest`、`git`、`npm`。
+- 只允许程序白名单：`python`、`pytest`、`git`、`npm`、`uv`。
 - 不接受任意命令字符串；工具输入必须是 `program`、`args`、`cwd`、`timeout` 的结构化对象。
 - 使用 `subprocess.Popen(command, shell=False)`，不得通过 `cmd /c`、`powershell -Command` 或 `pwsh -Command` 拼接执行。
-- 每次调用必须经过 `ShellApprovalGate`；未批准不得启动进程。
+- 只读 Git 查询自动放行；`python`、`pytest`、`npm` 和 `uv` 调用必须经过 `ShellApprovalGate`，未批准不得启动进程。
 - 所有工作目录、脚本路径和路径参数解析后必须位于 `Workspace.root` 内。
 - 默认超时 60 秒，最大超时 300 秒；stdout/stderr 各最多保留 64 KiB。
 - 超时必须终止完整 Windows 进程树；输出超限时继续排空管道但只保留截断内容。
 - 不继承 `CODING_AGENT_API_KEY`、`OPENAI_API_KEY`、Authorization/Token/Secret 类敏感环境变量。
 - 现有读写工具、AgentLoop、trace/report 和 `AgentService` 兼容行为不能回归。
+- `git status`、`git diff`、`git log`、`git show`、`git branch`、`git rev-parse` 为只读命令，策略通过后自动执行；其他 Shell 命令仍需审批。
+- `uv` 允许 `sync --dev`、`run pytest [参数]`、`run python <工作区内脚本> [参数]` 和兼容的 `run <工作区内脚本> [参数]`，均需审批。
 
 ---
 
@@ -34,13 +36,14 @@
 - `ShellRequest(program: str, args: list[str], cwd: str = ".", timeout: float | None = None)`。
 - `ValidatedShellRequest` 保存规范化程序名、参数、仓库相对 cwd、实际超时和执行文件名。
 - `ShellPolicy.validate(request, workspace) -> ValidatedShellRequest`。
-- `ShellPolicy` 默认 `allowed_programs=frozenset({"python", "pytest", "git", "npm"})`、`default_timeout=60.0`、`max_timeout=300.0`、`max_output_bytes=64 * 1024`。
+- `ShellPolicy` 默认 `allowed_programs=frozenset({"python", "pytest", "git", "npm", "uv"})`、`default_timeout=60.0`、`max_timeout=300.0`、`max_output_bytes=64 * 1024`。
+- `ValidatedShellRequest` 包含 `approval_required: bool`；只读 Git 子命令为 `False`，其他允许命令为 `True`。
 
 - [ ] **Step 1: 编写失败测试**
 
 覆盖以下具体断言：
 
-测试函数必须明确覆盖：`test_allows_python_script_inside_workspace`、`test_rejects_unknown_program`、`test_rejects_shell_metacharacters`、`test_rejects_python_c_and_m`、`test_allows_read_only_git_commands_and_rejects_commit`、`test_allows_npm_test_and_run_but_rejects_install`、`test_rejects_path_outside_workspace`、`test_rejects_timeout_above_maximum`。每个测试创建 `ShellRequest`，调用 `ShellPolicy.validate(request, Workspace(sample_git_repo))`，并断言返回的规范化字段或具体异常错误类型。
+测试函数必须明确覆盖：`test_allows_python_script_inside_workspace`、`test_rejects_unknown_program`、`test_rejects_shell_metacharacters`、`test_rejects_python_c_and_m`、`test_allows_read_only_git_commands_and_rejects_commit`、`test_read_only_git_commands_do_not_require_approval`、`test_allows_npm_test_and_run_but_rejects_install`、`test_allows_uv_run_pytest_and_python_script`、`test_rejects_path_outside_workspace`、`test_rejects_timeout_above_maximum`。每个测试创建 `ShellRequest`，调用 `ShellPolicy.validate(request, Workspace(sample_git_repo))`，并断言返回的规范化字段或具体异常错误类型。
 
 每个拒绝断言检查稳定错误类型，例如 `command_not_allowed`、`subcommand_not_allowed`、`unsafe_argument` 或 `workspace_violation`。
 
@@ -54,13 +57,14 @@
 
 实现 `ShellPolicy` 的规范化和校验：
 
-1. `program.lower()` 后只接受四个白名单值。
+1. `program.lower()` 后只接受五个白名单值。
 2. 所有 token 拒绝 `&`、`|`、`;`、`<`、`>`、反引号、``、`\n` 以及 `cmd.exe`/`powershell.exe`/`pwsh.exe`。
 3. 使用 `Workspace.resolve_relative()` 校验 cwd 和脚本/路径参数；拒绝符号链接组件、仓库外路径和不存在的 cwd。
 4. `python` 只接受仓库内 `.py` 脚本作为第一个位置参数，拒绝 `-c`、`-m`。
 5. `git` 只接受 `status`、`diff`、`log`、`show`、`branch`、`rev-parse`；拒绝 `commit`、`push`、`reset`、`clean` 等写操作。
 6. `npm` 只接受 `test` 或 `run` 后跟一个脚本名，拒绝 `install`、`exec`、`publish`。
-7. timeout 缺省使用 60 秒，非正数或超过 300 秒直接返回 `invalid_arguments`。
+7. `uv` 只接受 `sync --dev`、`run pytest [参数]`、`run python <script.py> [参数]` 或 `run <script.py> [参数]`。
+8. timeout 缺省使用 60 秒，非正数或超过 300 秒直接返回 `invalid_arguments`；只读 Git 查询设置 `approval_required=False`，其余允许命令设置为 `True`。
 
 - [ ] **Step 4: 运行策略测试**
 
@@ -142,7 +146,7 @@ git commit -m "feat: add bounded Windows shell runner"
 
 测试函数必须明确覆盖：`test_shell_tool_requires_approval_without_starting_runner`、`test_shell_tool_denial_returns_structured_error`、`test_shell_tool_approves_and_returns_process_result`、`test_shell_tool_policy_error_does_not_request_approval`、`test_shell_tool_emits_approval_events_to_current_sink`、`test_shell_tool_reports_timeout_and_truncated_output`。每个测试传入固定的 `program`、`args`、`cwd` 和 `timeout`，并断言 fake runner 调用次数、稳定错误类型和事件顺序。
 
-审批测试断言 runner 调用次数为零或一；事件测试断言顺序为 `approval_request`、`approval_result`、`tool_result`，且 report payload 包含完整非敏感预览。
+审批测试断言需审批命令的 runner 调用次数为零或一；只读 Git 命令不调用审批回调并记录 `approval_result` 的 `decision=auto_approved`。普通审批事件顺序为 `approval_request`、`approval_result`、`tool_result`，且 report payload 包含完整非敏感预览。
 
 - [ ] **Step 2: 运行失败测试**
 
@@ -152,7 +156,7 @@ git commit -m "feat: add bounded Windows shell runner"
 
 - [ ] **Step 3: 实现 ShellTool**
 
-执行顺序固定为：解析 Schema 参数 -> `ShellPolicy.validate()` -> 构造 `ShellPreview` -> 通过当前 EventSink 记录审批请求 -> 调用 approval callback -> 记录批准/拒绝 -> 批准后调用 runner -> 返回稳定结果。策略拒绝不产生审批询问；审批拒绝和无 callback 分别返回 `approval_denied`、`approval_required`。
+执行顺序固定为：解析 Schema 参数 -> `ShellPolicy.validate()` -> 构造 `ShellPreview` -> 若 `approval_required=False` 则记录 `approval_result/auto_approved` 并调用 runner；否则通过当前 EventSink 记录审批请求 -> 调用 approval callback -> 记录批准/拒绝 -> 批准后调用 runner -> 返回稳定结果。策略拒绝不产生审批询问；审批拒绝和无 callback 分别返回 `approval_denied`、`approval_required`。
 
 在 `approval.py` 中抽取现有事件 sink 上下文的通用小适配，保持 `WriteApprovalGate` 的行为兼容；ShellTool 使用同一当前 run sink，不在工厂绑定某一次 recorder。
 

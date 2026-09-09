@@ -38,6 +38,7 @@ class ValidatedShellRequest:
     cwd: str
     timeout: float
     executable: str
+    approval_required: bool = True
 
 #定义 Shell 请求、策略和稳定错误，工具内部业务检验
 class ShellPolicy:
@@ -89,6 +90,7 @@ class ShellPolicy:
             cwd=_relative_display(workspace.root, cwd),
             timeout=float(timeout),
             executable=program,
+            approval_required=not (program == "git" and request.args and request.args[0].lower() in _READ_ONLY_GIT_COMMANDS),
         )
 
     def _validate_program_args(self, program: str, args: list[str], workspace: Workspace) -> None:
@@ -121,13 +123,28 @@ class ShellPolicy:
             if args == ["sync", "--dev"]:
                 return
             if len(args) >= 2 and args[0] == "run":
-                script_index = 1
-                script = args[script_index]
+                if args[1] == "pytest":
+                    self._validate_pytest_args(args[2:], workspace)
+                    return
+                if args[1] == "python" and len(args) >= 3:
+                    script = args[2]
+                    if script.startswith("-") or not script.lower().endswith(".py"):
+                        raise ShellPolicyError("subcommand_not_allowed", "uv run python may only execute a workspace Python script")
+                    self._workspace_path(workspace, script, "script_not_found", must_exist=True, must_be_file=True)
+                    return
+                script = args[1]
                 if script.startswith("-") or not script.lower().endswith(".py"):
                     raise ShellPolicyError("subcommand_not_allowed", "uv run may only execute a workspace Python script")
                 self._workspace_path(workspace, script, "script_not_found", must_exist=True, must_be_file=True)
                 return
             raise ShellPolicyError("subcommand_not_allowed", "Only 'uv sync --dev' or 'uv run <script.py>' is allowed")
+
+    def _validate_pytest_args(self, args: list[str], workspace: Workspace) -> None:
+        for token in args:
+            if token.startswith("-"):
+                continue
+            if _looks_like_path(token):
+                self._workspace_path(workspace, token, "workspace_violation", must_exist=False)
 
     @staticmethod
     def _workspace_path(

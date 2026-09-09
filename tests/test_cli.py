@@ -238,7 +238,7 @@ def test_cli_shell_command_runs_after_approval(monkeypatch, sample_git_repo, tmp
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("builtins.input", lambda _: "y")
     client = FakeClient([
-        AssistantTurn(None, [ToolCall("shell-1", "shell", {"program": "git", "args": ["status"]})]),
+        AssistantTurn(None, [ToolCall("shell-1", "shell", {"program": "pytest", "args": ["tests"]})]),
         AssistantTurn("checked", []),
     ])
     calls = []
@@ -262,7 +262,7 @@ def test_cli_shell_command_is_rejected_without_tty(monkeypatch, sample_git_repo,
     monkeypatch.setattr("coding_agent.cli.RUNS_ROOT", tmp_path / "runs")
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
     client = FakeClient([
-        AssistantTurn(None, [ToolCall("shell-1", "shell", {"program": "git", "args": ["status"]})]),
+        AssistantTurn(None, [ToolCall("shell-1", "shell", {"program": "pytest", "args": ["tests"]})]),
         AssistantTurn("approval needed", []),
     ])
     monkeypatch.setattr("coding_agent.cli.LLMClient", lambda **kwargs: client)

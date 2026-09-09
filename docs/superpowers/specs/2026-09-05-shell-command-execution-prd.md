@@ -20,10 +20,10 @@
 
 - 新增 `shell` 工具，输入是 `program`、`args`、`cwd` 和可选 `timeout`，不接受任意命令字符串。
 - 第一版程序白名单为 `python`、`pytest`、`git`、`npm` 和受控的 `uv`。
-- `uv` 第一阶段只允许 `uv sync --dev` 或 `uv run <工作区内的 .py 脚本> [参数]`，每次调用都必须经过用户审批；其他 `uv` 子命令继续拒绝。
+- `uv` 允许 `uv sync --dev`、`uv run pytest [参数]` 和 `uv run python <工作区内的 .py 脚本> [参数]`，这些调用仍必须经过用户审批；其他 `uv` 子命令继续拒绝。
 - `python` 和 `pytest` 动态优先使用目标仓库 `.venv` 的解释器；不存在时才回退 Agent 进程解释器。
 - 目标 `.venv` 的 `Scripts`/`bin` 放在子进程 `PATH` 首位并设置 `VIRTUAL_ENV`，不切换 Agent 主进程环境。
-- 每次 shell 调用单独审批；没有审批回调时返回 `approval_required`，不得启动进程。
+- 可能产生副作用的 shell 调用单独审批；没有审批回调时返回 `approval_required`，不得启动进程。只读 Git 查询自动放行，不打断用户。
 - 默认使用 `shell=False` 的 Windows 进程启动方式，不通过 `cmd /c` 或 `powershell -Command` 拼接字符串。
 - 工作目录、Python 脚本路径、pytest 路径和 Git 路径参数解析后必须位于 `Workspace.root` 内。
 - 拒绝命令连接符、管道、重定向、反引号、换行和嵌套 Shell 参数。
@@ -43,6 +43,7 @@
 - 不支持任意 PowerShell/CMD 字符串、命令链、管道、重定向或后台任务。
 - 不支持 `cmd.exe`、`powershell.exe`、`pwsh.exe` 作为白名单程序。
 - 不支持除 `uv sync --dev` 外的安装依赖、网络下载、发布包、自动提交、推送或创建 Pull Request。
+- `git status`、`git diff`、`git log`、`git show`、`git branch` 和 `git rev-parse` 属于只读命令，策略验证后自动执行，不请求用户审批。
 - 不支持跨多个命令的事务回滚。
 - 不支持跨 ask 生命周期的 shell 进程、会话或终端状态持久化。
 - 不实现命令白名单的配置文件热加载；白名单由代码中的 `ShellPolicy` 固定定义。
@@ -111,7 +112,7 @@ AgentLoop.run()
     └── ToolExecutor
           └── ShellTool.execute(arguments)
                 ├── ShellPolicy.validate()
-                ├── ShellApprovalGate.approve()
+                ├── ShellApprovalGate.approve()（仅需审批的命令）
                 └── WindowsProcessRunner.run()
 ```
 
@@ -136,7 +137,7 @@ class ShellPolicy:
 
 ### 4.3 ShellTool 与审批
 
-`ShellTool` 遵循现有 ToolRegistry 工具契约，先做参数 Schema 校验，再调用 `ShellPolicy`。校验通过后构造 `ShellPreview`，通过当前运行的 EventSink 发出 `approval_request`，由 CLI 的回调展示并等待用户输入；批准后才调用 runner。拒绝、无审批和策略拒绝均不启动进程。
+`ShellTool` 遵循现有 ToolRegistry 工具契约，先做参数 Schema 校验，再调用 `ShellPolicy`。策略同时返回命令是否需要审批：只读 Git 查询直接调用 runner；其他允许的命令构造 `ShellPreview`，通过当前运行的 EventSink 发出 `approval_request`，由 CLI 的回调展示并等待用户输入。拒绝、无审批和策略拒绝均不启动进程。自动放行命令记录 `approval_result` 的 `decision=auto_approved`，不产生交互式审批请求。
 
 ### 4.4 Agent 与 CLI
 

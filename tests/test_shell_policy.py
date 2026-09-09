@@ -46,9 +46,18 @@ def test_rejects_python_c_and_m(sample_git_repo):
 def test_allows_read_only_git_commands_and_rejects_commit(sample_git_repo):
     validated = ShellPolicy().validate(ShellRequest("git", ["status"]), policy_workspace(sample_git_repo))
     assert validated.program == "git"
+    assert validated.approval_required is False
     with pytest.raises(ShellPolicyError) as raised:
         ShellPolicy().validate(ShellRequest("git", ["commit", "-am", "x"]), policy_workspace(sample_git_repo))
     assert raised.value.error_type == "subcommand_not_allowed"
+
+
+def test_non_read_only_commands_require_approval(sample_git_repo):
+    (sample_git_repo / "script.py").write_text("print(1)\n", encoding="utf-8")
+
+    validated = ShellPolicy().validate(ShellRequest("python", ["script.py"]), policy_workspace(sample_git_repo))
+
+    assert validated.approval_required is True
 
 
 def test_allows_npm_test_and_run_but_rejects_install(sample_git_repo):
@@ -100,6 +109,22 @@ def test_allows_uv_run_workspace_script(sample_git_repo):
         ShellRequest("uv", ["run", "scripts/check.py", "--verbose"]), policy_workspace(sample_git_repo)
     )
     assert validated.args == ["run", "scripts/check.py", "--verbose"]
+
+
+def test_allows_uv_run_pytest_and_python_script(sample_git_repo):
+    script = sample_git_repo / "scripts" / "check.py"
+    script.parent.mkdir(exist_ok=True)
+    script.write_text("print('ok')\n", encoding="utf-8")
+
+    pytest_request = ShellPolicy().validate(
+        ShellRequest("uv", ["run", "pytest", "tests", "-q"]), policy_workspace(sample_git_repo)
+    )
+    python_request = ShellPolicy().validate(
+        ShellRequest("uv", ["run", "python", "scripts/check.py"]), policy_workspace(sample_git_repo)
+    )
+
+    assert pytest_request.approval_required is True
+    assert python_request.approval_required is True
 
 
 def test_rejects_unsafe_uv_run_targets(sample_git_repo):

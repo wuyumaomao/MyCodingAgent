@@ -72,9 +72,9 @@ def test_reused_agent_records_approval_events_in_current_run(monkeypatch, sample
 
 def test_agent_uses_current_recorder_for_shell_approval_events(sample_git_repo, tmp_path):
     llm = FakeLLM([
-        AssistantTurn(None, [ToolCall("s1", "shell", {"program": "git", "args": ["status"]})]),
+        AssistantTurn(None, [ToolCall("s1", "shell", {"program": "pytest", "args": ["tests"]})]),
         AssistantTurn("first", []),
-        AssistantTurn(None, [ToolCall("s2", "shell", {"program": "git", "args": ["status"]})]),
+        AssistantTurn(None, [ToolCall("s2", "shell", {"program": "pytest", "args": ["tests"]})]),
         AssistantTurn("second", []),
     ])
     runner = FakeShellRunner()
@@ -98,7 +98,7 @@ def test_agent_uses_current_recorder_for_shell_approval_events(sample_git_repo, 
 
 def test_shell_result_is_returned_to_model_as_role_tool(sample_git_repo):
     llm = FakeLLM([
-        AssistantTurn(None, [ToolCall("s1", "shell", {"program": "git", "args": ["status"]})]),
+        AssistantTurn(None, [ToolCall("s1", "shell", {"program": "pytest", "args": ["tests"]})]),
         AssistantTurn("done", []),
     ])
     agent = CodingAgent.from_settings(

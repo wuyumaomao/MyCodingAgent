@@ -10,7 +10,7 @@ from .shell_policy import ShellPolicy, ShellPolicyError, ShellRequest
 from .shell_runner import ShellRunResult, ShellRunnerError, WindowsProcessRunner
 
 
-ApprovalDecision = Literal["approved", "denied", "required"]
+ApprovalDecision = Literal["approved", "denied", "required", "auto_approved"]
 
 
 @dataclass(frozen=True)
@@ -94,7 +94,17 @@ class ShellTool:
             return _error(exc.error_type, exc.public_message)
 
         preview = ShellPreview(validated.program, validated.args, validated.cwd, validated.timeout)
-        decision = self.approval_gate.approve(preview)#询问是否通过，记录在trace
+        if validated.approval_required:
+            decision = self.approval_gate.approve(preview)#询问是否通过，记录在trace
+        else:
+            decision = "auto_approved"
+            emit_current_event(
+                "approval_result",
+                operation="shell",
+                program=preview.program,
+                decision=decision,
+                reason="read_only_command",
+            )
         if decision == "required":
             return _error("approval_required", "User approval is required before running a command")
         if decision == "denied":
