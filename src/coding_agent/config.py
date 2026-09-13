@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 
 
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
-DEFAULT_TIMEOUT = 60.0
+DEFAULT_TIMEOUT = 600.0
 
 
 class ConfigError(ValueError):

@@ -45,3 +45,49 @@ def test_model_gateway_returns_turn_unchanged():
             return turn
 
     assert ModelGateway(Client()).complete([], []) is turn
+
+
+def test_model_gateway_retries_retryable_failure_and_reports_attempt():
+    turn = AssistantTurn("done", [])
+
+    class Client:
+        def __init__(self):
+            self.calls = 0
+            self.requests = []
+
+        def complete(self, messages, tools):
+            self.calls += 1
+            self.requests.append((messages, tools))
+            if self.calls == 1:
+                raise LLMTimeoutError("timed out")
+            return turn
+
+    retries = []
+    client = Client()
+    result = ModelGateway(client, max_retries=1).complete(
+        [{"role": "user", "content": "x"}], [], on_retry=retries.append
+    )
+
+    assert result is turn
+    assert client.calls == 2
+    assert client.requests[0] == client.requests[1]
+    assert retries[0]["attempt"] == 1
+    assert retries[0]["error_type"] == "timeout"
+    assert retries[0]["duration_ms"] >= 0
+
+
+def test_model_gateway_does_not_retry_non_retryable_response_error():
+    class Client:
+        def __init__(self):
+            self.calls = 0
+
+        def complete(self, messages, tools):
+            self.calls += 1
+            raise LLMResponseError("truncated", retryable=False)
+
+    client = Client()
+    with pytest.raises(ModelGatewayError) as exc_info:
+        ModelGateway(client, max_retries=1).complete([], [])
+
+    assert client.calls == 1
+    assert exc_info.value.error_type == "invalid_response"

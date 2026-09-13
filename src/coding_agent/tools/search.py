@@ -14,12 +14,18 @@ class SearchTool:
     """Search UTF-8 text content inside the repository workspace."""
 
     name = "search"
-    description = "Search text content in workspace files with rg or a safe fallback."
+    description = (
+        "Recursively search text content under a repository directory. "
+        "The path must be an existing directory, not a file; use readfile for one known file."
+    )
     parameters = {
         "type": "object",
         "properties": {
             "pattern": {"type": "string", "description": "Regular expression to search for."},
-            "path": {"type": "string", "description": "Repository-relative directory to search."},
+            "path": {
+                "type": "string",
+                "description": "Repository-relative directory to search; must be an existing directory, not a file. Defaults to '.'.",
+            },
             "max_results": {"type": "integer", "minimum": 1},
         },
         "required": ["pattern"],

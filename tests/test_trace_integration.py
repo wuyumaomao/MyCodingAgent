@@ -8,6 +8,7 @@ from coding_agent.agent import AgentError, AgentLimits, AgentLoop
 from coding_agent.context import build_repository_context
 from coding_agent.llm import LLMResponseError, LLMTimeoutError
 from coding_agent.models import AssistantTurn, ToolCall
+from coding_agent.response_parser import ParsedResponse
 from coding_agent.repository import Workspace
 from coding_agent.tools.listfiles import ListFilesTool
 from coding_agent.tools.readfile import ReadFileTool
@@ -74,7 +75,7 @@ def test_trace_records_provider_failure(sample_git_repo, tmp_path):
 
 def test_trace_records_invalid_model_response(sample_git_repo, tmp_path):
     recorder = RunRecorder.create("Explain", sample_git_repo, tmp_path / "runs")
-    llm = FakeLLM([LLMResponseError("invalid finish reason")])
+    llm = FakeLLM([LLMResponseError("invalid finish reason"), LLMResponseError("invalid finish reason")])
 
     with pytest.raises(AgentError):
         AgentLoop(llm, make_registry(sample_git_repo), recorder=recorder).run(
@@ -86,9 +87,27 @@ def test_trace_records_invalid_model_response(sample_git_repo, tmp_path):
     assert failures[-1]["error_type"] == "invalid_response"
 
 
+def test_trace_records_llm_retry_and_api_attempt_count(sample_git_repo, tmp_path):
+    recorder = RunRecorder.create("Explain", sample_git_repo, tmp_path / "runs")
+    llm = FakeLLM([LLMTimeoutError("timed out"), ParsedResponse("Done", [], finish_reason="stop")])
+
+    AgentLoop(llm, make_registry(sample_git_repo), recorder=recorder).run(
+        "Explain", Workspace(sample_git_repo)
+    )
+
+    events = json.loads(recorder.trace_path.read_text(encoding="utf-8"))["events"]
+    retries = [event for event in events if event["type"] == "llm_retry"]
+    responses = [event for event in events if event["type"] == "llm_response"]
+    assert len(retries) == 1
+    assert retries[0]["error_type"] == "timeout"
+    assert responses[0]["api_attempts"] == 2
+    assert responses[0]["finish_reason"] == "stop"
+    assert responses[0]["finish_reason_source"] == "provider"
+
+
 def test_trace_records_timeout_as_timeout(sample_git_repo, tmp_path):
     recorder = RunRecorder.create("Explain", sample_git_repo, tmp_path / "runs")
-    llm = FakeLLM([LLMTimeoutError("timed out")])
+    llm = FakeLLM([LLMTimeoutError("timed out"), LLMTimeoutError("timed out")])
     with pytest.raises(AgentError):
         AgentLoop(llm, make_registry(sample_git_repo), recorder=recorder).run(
             "Explain", Workspace(sample_git_repo)

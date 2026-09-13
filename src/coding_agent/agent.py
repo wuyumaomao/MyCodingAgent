@@ -22,14 +22,17 @@ class AgentError(RuntimeError):
 
 @dataclass(frozen=True)
 class AgentLimits:
-    max_rounds: int = 10
+    max_rounds: int = 20
     max_calls_per_tool: int = 3
+    max_llm_retries: int = 1
 
     def __post_init__(self) -> None:
         if self.max_rounds <= 0:
             raise ValueError("max_rounds must be positive")
         if self.max_calls_per_tool <= 0:
             raise ValueError("max_calls_per_tool must be positive")
+        if self.max_llm_retries < 0:
+            raise ValueError("max_llm_retries must be non-negative")
 
 
 class AgentLoop:
@@ -45,9 +48,9 @@ class AgentLoop:
     ) -> None:
         if limits is not None and max_rounds is not None:
             raise ValueError("Pass limits or max_rounds, not both")
-        self.limits = limits or AgentLimits(max_rounds=max_rounds or 10)
+        self.limits = limits or AgentLimits(max_rounds=max_rounds or 20)
         self.llm_client = llm_client
-        self.model_gateway = ModelGateway(llm_client)
+        self.model_gateway = ModelGateway(llm_client, max_retries=self.limits.max_llm_retries)
         self.registry = registry
         self.repository_context_builder = repository_context_builder
         self.recorder = recorder
@@ -70,8 +73,17 @@ class AgentLoop:
                 report_payload={"messages": messages, "tools": tool_definitions},
             )
             request_started = time.perf_counter()
+            retry_count = 0
+
+            def record_retry(payload: dict[str, object]) -> None:
+                nonlocal retry_count
+                retry_count += 1
+                sink.emit("llm_retry", round=round_number, **payload)
+
             try:#llm返回结果
-                turn: AssistantTurn = self.model_gateway.complete(messages, tool_definitions)
+                turn: AssistantTurn = self.model_gateway.complete(
+                    messages, tool_definitions, on_retry=record_retry
+                )
             except ModelGatewayError as exc:
                 sink.fail(
                     exc.error_type,
@@ -84,6 +96,9 @@ class AgentLoop:
                 "has_content": bool(turn.content),
                 "tool_call_count": len(turn.tool_calls),
                 "duration_ms": _duration_ms(request_started),
+                "finish_reason": getattr(turn, "finish_reason", None),
+                "finish_reason_source": getattr(turn, "finish_reason_source", None),
+                "api_attempts": retry_count + 1,
             }
             sink.emit(
                 "llm_response",
@@ -108,8 +123,8 @@ class AgentLoop:
             for call in turn.tool_calls:#把工具调用记录写到trace
                 execution = tool_executor.execute(call)
                 context.add_tool_result(call, execution.result)#追加 tool 结果消息
-        answer = f"Reached the tool-call limit of {self.max_rounds} rounds before the task was complete."
-        sink.fail("round_limit", "Reached the tool-call limit")
+        answer = f"Reached the round limit of {self.max_rounds} before the task was complete."
+        sink.fail("round_limit", "Reached the round limit")
         return answer
 
 def _duration_ms(started: float) -> float:

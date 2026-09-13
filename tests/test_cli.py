@@ -64,6 +64,17 @@ def test_settings_parse_timeout(monkeypatch):
     assert settings.timeout == 12.5
 
 
+def test_settings_default_model_timeout_is_600_seconds(monkeypatch):
+    monkeypatch.setenv("CODING_AGENT_API_KEY", "env-key")
+    monkeypatch.setenv("CODING_AGENT_MODEL", "env-model")
+
+    settings = Settings.from_args_and_env(
+        Namespace(api_key=None, model=None, base_url=None, timeout=None)
+    )
+
+    assert settings.timeout == 600.0
+
+
 def test_settings_reject_non_positive_timeout(monkeypatch):
     monkeypatch.setenv("CODING_AGENT_API_KEY", "env-key")
     monkeypatch.setenv("CODING_AGENT_MODEL", "env-model")

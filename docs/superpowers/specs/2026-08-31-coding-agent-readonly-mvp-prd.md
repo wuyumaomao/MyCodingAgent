@@ -136,7 +136,7 @@ CLI
 - 扫描到的常见入口文件（如 `main.py`、`app.py`、`run.py`、`cli.py`、`__main__.py`）内容
 - `git status --short` 的启动时快照
 
-重要文件单个最多读取 12KB；超过限制时只保留前 12KB 并附带截断标记。文件不存在、不可读或 Git 状态获取失败时，写入简短状态说明，不阻断整个 run。重要文件内容和 Git 状态均按普通 system message 注入，不作为工具调用结果追加到 history。
+重要文件只在 system message 中提供路径和存在性状态，不预加载文件内容；模型需要具体内容时通过 `readfile` 工具读取。文件不存在、不可读或 Git 状态获取失败时，写入简短状态说明，不阻断整个 run。这样可避免 workspace 前缀过长以及与后续工具读取重复。
 
 #### AgentLoop
 
@@ -375,7 +375,7 @@ sample-repo/
 - 10 轮上限和模型请求错误
 - 稳定仓库上下文包含文件清单、重要项目文件内容和 `git status --short`
 - 重要文件包括根目录下的 `README.md`、`pyproject.toml`、`package.json`、`AGENTS.md`、`.env.example`，以及扫描到的常见入口文件（如 `main.py`、`app.py`、`run.py`、`cli.py`、`__main__.py`）
-- 重要文件缺失、不可读和超过 12KB 时不会阻断 run，并生成明确的状态说明
+- 重要文件缺失或不可读时不会阻断 run，并生成明确的状态说明；重要文件内容不预加载，由 `readfile` 按需读取
 - report 包含完整请求、工具调用和规范化模型响应，trace 只保留摘要
 - 超时配置和每个模型/工具步骤的耗时可以在 trace 中复盘
 

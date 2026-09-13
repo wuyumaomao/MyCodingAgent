@@ -12,3 +12,7 @@ build/
 .codex/
 .superpowers/
 /demo-repo/
+.benchmark-check/
+.benchmark-check-rerun/
+.vscode/launch.json
+agent_bug.md

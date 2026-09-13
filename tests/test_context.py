@@ -28,7 +28,8 @@ def test_context_includes_important_files_entrypoint_env_and_git_status(sample_g
 
     assert "[Important Files]" in context
     assert "### pyproject.toml" in context
-    assert "name = 'sample'" in context
+    assert "content:" not in context
+    assert "status: present" in context
     assert "### AGENTS.md" in context
     assert "### main.py" in context
     assert "### .env.example" in context
@@ -45,14 +46,15 @@ def test_context_reports_missing_important_files_without_failing(sample_git_repo
     assert "### .env.example" in context
 
 
-def test_context_truncates_large_important_file(sample_git_repo):
+def test_context_does_not_embed_large_important_file(sample_git_repo):
     large_content = "x" * (12 * 1024) + "TAIL_MARKER"
     (sample_git_repo / "README.md").write_text(large_content, encoding="utf-8")
 
     context = build_repository_context(Workspace(sample_git_repo))
 
     assert "### README.md" in context
-    assert "truncated: true" in context
+    assert "status: present" in context
+    assert "truncated: true" not in context
     assert "TAIL_MARKER" not in context
 
 
@@ -69,6 +71,17 @@ def test_context_keeps_static_system_messages_and_appends_history(sample_git_rep
     assert messages[1]["role"] == "system"
     assert len(context.system_messages) == 2
     assert len(context.history) == 3
+
+
+def test_context_instructs_model_to_use_write_tools_for_approval(sample_git_repo):
+    context = ConversationContext(Workspace(sample_git_repo))
+
+    prompt = context.system_messages[0]["content"]
+
+    assert "directly call write_file or patch_file" in prompt
+    assert "Do not ask for approval in ordinary text" in prompt
+    assert "tools automatically request user approval" in prompt
+    assert "multiple tool calls in the same response" in prompt
 
 
 def test_context_messages_returns_copy(sample_git_repo):

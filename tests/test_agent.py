@@ -28,6 +28,16 @@ class FakeLLM:
         return self.turns.pop(0)
 
 
+class RetryingFakeLLM(FakeLLM):
+    def complete(self, messages, tools):
+        self.calls += 1
+        self.messages.append(messages)
+        turn = self.turns.pop(0)
+        if isinstance(turn, Exception):
+            raise turn
+        return turn
+
+
 def make_registry(repo):
     workspace = Workspace(repo)
     registry = ToolRegistry()
@@ -80,18 +90,18 @@ def test_loop_stops_after_four_tool_rounds(sample_git_repo):
     assert llm.calls == 4
 
 
-def test_loop_defaults_to_ten_tool_rounds(sample_git_repo):
+def test_loop_defaults_to_twenty_tool_rounds(sample_git_repo):
     llm = FakeLLM(
         [
             AssistantTurn(None, [ToolCall(f"call-{n}", "listfiles", {})])
-            for n in range(10)
+            for n in range(20)
         ]
     )
     answer = AgentLoop(llm, make_registry(sample_git_repo)).run(
         "Inspect", Workspace(sample_git_repo)
     )
-    assert "10" in answer
-    assert llm.calls == 10
+    assert "20" in answer
+    assert llm.calls == 20
 
 
 def test_loop_returns_tool_error_to_model(sample_git_repo):
@@ -152,6 +162,25 @@ def test_agent_report_contains_full_messages_without_debug_flag(sample_git_repo,
     responses = [event for event in events if event["type"] == "llm_response"]
     assert "duration_ms" in responses[0]
     assert all(event["type"] not in {"span_start", "span_end"} for event in events)
+
+
+def test_loop_retries_llm_api_within_same_round_and_records_metadata(sample_git_repo, tmp_path):
+    recorder = RunRecorder.create("read", sample_git_repo, tmp_path / "runs")
+    llm = RetryingFakeLLM([InvalidToolArguments("bad args"), AssistantTurn("done", [])])
+
+    answer = AgentLoop(llm, make_registry(sample_git_repo), recorder=recorder).run(
+        "read", Workspace(sample_git_repo)
+    )
+
+    assert answer == "done"
+    assert llm.calls == 2
+    events = json.loads(recorder.trace_path.read_text(encoding="utf-8"))["events"]
+    retry = next(event for event in events if event["type"] == "llm_retry")
+    response = next(event for event in events if event["type"] == "llm_response")
+    assert retry["round"] == 1
+    assert retry["error_type"] == "invalid_tool_arguments"
+    assert response["api_attempts"] == 2
+    assert response["round"] == 1
 
 
 def test_loop_rejects_tool_after_per_tool_limit(sample_git_repo):

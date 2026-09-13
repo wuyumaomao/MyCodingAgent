@@ -23,11 +23,12 @@ class LLMClient:
         api_key: str,
         model: str,
         base_url: str | None = None,
-        timeout: float = 60.0,
+        timeout: float = 600.0,
     ) -> None:
         self.model = model
         self.response_parser = ResponseParser()
-        kwargs: dict[str, Any] = {"api_key": api_key, "timeout": timeout}
+        # Disable SDK-level retries so the gateway owns retry accounting.
+        kwargs: dict[str, Any] = {"api_key": api_key, "timeout": timeout, "max_retries": 0}
         if base_url:
             kwargs["base_url"] = base_url
         self._client = OpenAI(**kwargs)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+import time
 from typing import Any
 
 from .llm import InvalidToolArguments, LLMResponseError, LLMTimeoutError
@@ -18,25 +20,65 @@ class ModelGatewayError(RuntimeError):
 class ModelGateway:
     """Call an LLM client and normalize provider failures."""
 
-    def __init__(self, llm_client: Any) -> None:
+    def __init__(self, llm_client: Any, max_retries: int = 1) -> None:
+        if max_retries < 0:
+            raise ValueError("max_retries must be non-negative")
         self.llm_client = llm_client
+        self.max_retries = max_retries
 
     def complete(
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
+        on_retry: Callable[[dict[str, object]], None] | None = None,
     ) -> AssistantTurn:
-        try:
-            return self.llm_client.complete(messages, tools)
-        except LLMTimeoutError as exc:
-            raise ModelGatewayError("timeout", "The model request timed out") from exc
-        except InvalidToolArguments as exc:
-            raise ModelGatewayError(
-                "invalid_tool_arguments", "The model returned invalid tool arguments"
-            ) from exc
-        except LLMResponseError as exc:
-            raise ModelGatewayError(
-                "invalid_response", "The model returned an invalid response"
-            ) from exc
-        except Exception as exc:
-            raise ModelGatewayError("provider_error", "The model request failed") from exc
+        for attempt in range(self.max_retries + 1):
+            started = time.perf_counter()
+            try:
+                return self.llm_client.complete(messages, tools)
+            except Exception as exc:
+                retryable = self._is_retryable(exc)
+                if retryable and attempt < self.max_retries:
+                    if on_retry is not None:
+                        on_retry(
+                            {
+                                "attempt": attempt + 1,
+                                "error_type": self._error_type(exc),
+                                "duration_ms": self._duration_ms(started),
+                            }
+                        )
+                    continue
+                raise self._normalize(exc) from exc
+
+        raise AssertionError("unreachable")
+
+    @staticmethod
+    def _is_retryable(exc: Exception) -> bool:
+        if isinstance(exc, LLMResponseError):
+            return exc.retryable
+        return isinstance(exc, (LLMTimeoutError, InvalidToolArguments))
+
+    @staticmethod
+    def _error_type(exc: Exception) -> str:
+        if isinstance(exc, LLMTimeoutError):
+            return "timeout"
+        if isinstance(exc, InvalidToolArguments):
+            return "invalid_tool_arguments"
+        if isinstance(exc, LLMResponseError):
+            return "invalid_response"
+        return "provider_error"
+
+    @classmethod
+    def _normalize(cls, exc: Exception) -> ModelGatewayError:
+        error_type = cls._error_type(exc)
+        messages = {
+            "timeout": "The model request timed out",
+            "invalid_tool_arguments": "The model returned invalid tool arguments",
+            "invalid_response": "The model returned an invalid response",
+            "provider_error": "The model request failed",
+        }
+        return ModelGatewayError(error_type, messages[error_type])
+
+    @staticmethod
+    def _duration_ms(started: float) -> float:
+        return round((time.perf_counter() - started) * 1000, 3)

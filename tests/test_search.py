@@ -33,3 +33,11 @@ def test_search_falls_back_when_rg_is_unavailable(monkeypatch, sample_git_repo):
     result = SearchTool(Workspace(sample_git_repo)).execute({"pattern": "Sample Repository"})
 
     assert result["matches"] == [{"path": "README.md", "line": 1, "text": "# Sample Repository"}]
+
+
+def test_search_description_explains_directory_path_requirement(sample_git_repo):
+    tool = SearchTool(Workspace(sample_git_repo))
+
+    assert "directory" in tool.description.lower()
+    assert "not a file" in tool.description.lower()
+    assert "directory" in tool.parameters["properties"]["path"]["description"].lower()

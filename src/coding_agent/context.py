@@ -16,10 +16,13 @@ SYSTEM_PROMPT = (
     "You are a  coding agent. Use only the provided tools, "
     "stay inside the repository workspace, and explain findings based on evidence. "
     "If python or pytest fails because target dependencies are missing, request approval "
-    "to run uv sync --dev, then retry the command."
+    "to run uv sync --dev, then retry the command. "
+    "For file writes or patches, directly call write_file or patch_file. "
+    "Do not ask for approval in ordinary text; those tools automatically request user approval. "
+    "When multiple known files are independent, prefer returning multiple tool calls in the same response "
+    "instead of reading one file per round."
 )
 
-IMPORTANT_FILE_MAX_BYTES = 12 * 1024
 _IMPORTANT_FILES = (
     "README.md",
     "pyproject.toml",
@@ -144,16 +147,11 @@ def _important_files_context(workspace: Workspace, entries: list[FileEntry]) -> 
             lines.append("status: missing")
             continue
         try:
-            raw = file_path.read_bytes()
+            file_path.stat()
         except OSError:
             lines.append("status: unreadable")
             continue
-        was_truncated = len(raw) > IMPORTANT_FILE_MAX_BYTES
-        content = raw[:IMPORTANT_FILE_MAX_BYTES].decode("utf-8", errors="replace")
         lines.append("status: present")
-        lines.append(f"truncated: {str(was_truncated).lower()}")
-        lines.append("content:")
-        lines.extend(content.splitlines())
     return lines
 
 

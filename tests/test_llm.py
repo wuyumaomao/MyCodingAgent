@@ -29,17 +29,52 @@ def test_llm_client_normalizes_tool_calls(monkeypatch):
     turn = client.complete([], [])
     assert turn.tool_calls[0].name == "readfile"
     assert turn.tool_calls[0].arguments == {"path": "package.json"}
+    assert turn.finish_reason == "tool_calls"
+    assert turn.finish_reason_source == "fallback"
 
 
 def test_llm_client_keeps_final_content(monkeypatch):
     response = SimpleNamespace(
-        choices=[SimpleNamespace(message=SimpleNamespace(content="done", tool_calls=[]))]
+        choices=[
+            SimpleNamespace(
+                finish_reason="stop",
+                message=SimpleNamespace(content="done", tool_calls=[]),
+            )
+        ]
     )
     client = LLMClient(api_key="key", model="model", base_url="https://example.test")
     monkeypatch.setattr(client, "_request", lambda messages, tools: response)
     turn = client.complete([], [])
     assert turn.content == "done"
     assert turn.tool_calls == []
+
+
+def test_llm_client_disables_sdk_retries(monkeypatch):
+    captured = {}
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr("coding_agent.llm.OpenAI", FakeOpenAI)
+
+    LLMClient(api_key="key", model="model")
+
+    assert captured["max_retries"] == 0
+
+
+def test_llm_client_default_timeout_is_600_seconds(monkeypatch):
+    captured = {}
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr("coding_agent.llm.OpenAI", FakeOpenAI)
+
+    LLMClient(api_key="key", model="model")
+
+    assert captured["timeout"] == 600.0
 
 
 def test_response_parser_classifies_final_response():
@@ -56,6 +91,7 @@ def test_response_parser_classifies_final_response():
 
     assert parsed.kind == "final"
     assert parsed.finish_reason == "stop"
+    assert parsed.finish_reason_source == "provider"
     assert parsed.content == "done"
 
 
@@ -112,6 +148,35 @@ def test_response_parser_rejects_inconsistent_tool_call_reason():
 
     with pytest.raises(LLMResponseError):
         ResponseParser().parse(response)
+
+
+def test_response_parser_rejects_missing_finish_reason_without_tool_calls():
+    response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content="done", tool_calls=[]),
+            )
+        ]
+    )
+
+    with pytest.raises(LLMResponseError):
+        ResponseParser().parse(response)
+
+
+def test_response_parser_marks_non_actionable_reason_as_non_retryable():
+    response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                finish_reason="length",
+                message=SimpleNamespace(content="partial", tool_calls=[]),
+            )
+        ]
+    )
+
+    with pytest.raises(LLMResponseError) as exc_info:
+        ResponseParser().parse(response)
+
+    assert exc_info.value.retryable is False
 
 
 def test_builtin_tool_schemas_are_valid_registry_definitions():

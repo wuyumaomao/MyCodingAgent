@@ -14,11 +14,16 @@ class InvalidToolArguments(ValueError):
 class LLMResponseError(RuntimeError):
     """Raised when a provider response cannot be classified safely."""
 
+    def __init__(self, message: str, *, retryable: bool = True) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+
 
 @dataclass(frozen=True)
 class ParsedResponse(AssistantTurn):#ParsedResponse继承AssistantTurn
     kind: Literal["final", "tool_call"] = "final"
     finish_reason: str = "stop"
+    finish_reason_source: Literal["provider", "fallback"] = "provider"
 
 
 class ResponseParser:
@@ -34,12 +39,19 @@ class ResponseParser:
         raw_tool_calls = getattr(message, "tool_calls", None) or []
         tool_calls = [self._parse_tool_call(call) for call in raw_tool_calls]
         finish_reason = getattr(choice, "finish_reason", None)#去拿finishreason
+        finish_reason_source: Literal["provider", "fallback"] = "provider"
         if finish_reason is None:#没有finishreason且没有toolcall就是结束
-            # Some OpenAI-compatible providers omit this metadata.
-            finish_reason = "tool_calls" if tool_calls else "stop"
+            # Some OpenAI-compatible providers omit this metadata for tool calls.
+            if tool_calls:
+                finish_reason = "tool_calls"
+                finish_reason_source = "fallback"
+            else:
+                raise LLMResponseError("The model response omitted finish_reason")
 
         if finish_reason in {"length", "content_filter"}:
-            raise LLMResponseError(f"The model response ended with {finish_reason}")
+            raise LLMResponseError(
+                f"The model response ended with {finish_reason}", retryable=False
+            )
         if finish_reason not in {"stop", "tool_calls", "function_call"}:
             raise LLMResponseError(f"Unknown finish_reason: {finish_reason}")
         if finish_reason in {"tool_calls", "function_call"} and not tool_calls:
@@ -52,6 +64,7 @@ class ResponseParser:
             tool_calls=tool_calls,
             kind="tool_call" if tool_calls else "final",
             finish_reason=str(finish_reason),
+            finish_reason_source=finish_reason_source,
         )
 
     @staticmethod
