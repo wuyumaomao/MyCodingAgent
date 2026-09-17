@@ -55,3 +55,18 @@ class LLMClient:
         #拿到模型原生返回
         response = self._request(messages, tools)
         return self.response_parser.parse(response)
+
+    def complete_text(self, messages: list[dict[str, Any]]) -> str:
+        """Run an independent no-tools request and return its text content."""
+        response = self._request(messages, [])
+        try:
+            choice = response.choices[0]
+            content = choice.message.content
+            finish_reason = getattr(choice, "finish_reason", None)
+        except (AttributeError, IndexError, TypeError) as exc:
+            raise LLMResponseError("The model response did not contain text content") from exc
+        if finish_reason not in (None, "stop"):
+            raise LLMResponseError(f"The summary response ended with {finish_reason}", retryable=False)
+        if not isinstance(content, str) or not content.strip():
+            raise LLMResponseError("The summary response did not contain text content")
+        return content

@@ -21,6 +21,7 @@
 - `episodic_notes` 最多 12 条；相关召回最多 3 条；`recent_files` 最多 10 条。
 - `write_file` / `patch_file` 成功后由 memory 层失效摘要，工具代码不得直接导入 session/memory。
 - 维持既有工作区安全、JSON Schema、审批、trace/report 和 API retry 行为。
+- 首轮 repository context 使用导航地图而非完整 manifest：只显示重要文件、少量顶层候选目录、固定忽略目录和按需工具提示。它和根目录 search 都必须隐藏 `.git`、`.coding-agent`、`.codex`、`.venv`、`venv`、`__pycache__`、`.pytest_cache`、`node_modules`、`dist`、`build`；已知范围时优先搜索更小目录。
 - 不执行 Git commit，除非用户另行明确要求。
 
 ---

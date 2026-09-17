@@ -32,6 +32,9 @@ Agent 需要保留后续有价值的证据，但不能把完整过程记录直�
 - Prompt 中必须保持 tool-call/result 配对。不得发送缺少其前置 assistant `tool_calls` 的 `role: tool` 消息。
 - 保持现有 `trace.json` / `report.json` 行为。即使 prompt 中采用压缩表示，report 仍保存原始完整工具输出。
 - 在 trace/report 中记录 session ID 和 prompt-memory 指标，以便诊断，但不向简洁 trace 写入私密正文。
+- repository context 和 `search(path=".")` 必须隐藏 Agent 内部目录及常见生成目录：`.git`、`.coding-agent`、`.codex`、`.venv`、`venv`、`__pycache__`、`.pytest_cache`、`node_modules`、`dist`、`build`。
+- 首轮 repository context 必须是紧凑的导航地图，而非完整文件树：只列重要文件、少量顶层候选目录、固定忽略目录和按需导航提示；更多结构由 `listfiles`，内容由 `readfile`，位置未知时的检索由 `search` 获取。
+- `search` 的工具描述必须要求：已知范围时优先使用更小的目录（如 `src`、`tests`），只有位置未知时才搜索仓库根目录。
 
 ### 2.2 不在本次范围内
 
@@ -132,7 +135,7 @@ session 文档具有版本号，且仅保存 JSON 安全的数据：
 }
 ```
 
-检索器从当前 query、当前 `task_summary` 和 `latest_tool_error` 中提取小写字母数字关键词。note 得分为相同唯一关键词的数量；得分为零的 note 不召回；并列时优先较新的 note。Memory Manager 最多保存 12 条 note，超出时淘汰最旧条目；失效 note 在检索前被移除。
+检索器从当前 query 和当前 `task_summary` 中提取关键词：ASCII 标识符整体匹配，连续中文段切分为 bigram。`latest_tool_error` **不参与召回**——它已经渲染进 `[Memory]` 区块供模型查看，而复述该错误的 note 与它文本高度重合，若同时作为检索词，会让这条 note 稳定压过用户真正问及的 note。note 得分为相同唯一关键词的数量；得分为零的 note 不召回；并列时优先较新的 note。Memory Manager 最多保存 12 条 note，超出时淘汰最旧条目；失效 note 在检索前被移除。
 
 ### 4.3 不同工具对 Memory 的更新
 

@@ -54,7 +54,7 @@ coding-agent "package.json 里有哪些可用命令" --repo .
 当前提供六个文件/搜索工具和一个受控命令工具：
 
 - `listfiles`：列出仓库中的文件和目录。
-- `readfile`：读取 UTF-8 文本文件。
+- `readfile`：读取 UTF-8 文本文件，可用 `start`/`end` 指定行范围。
 - `search`：搜索文件内容中的文本或正则表达式，返回匹配文件、行号和文本。
 - `find_files`：按文件名或 glob 模式查找文件，例如 `*.py`、`*shell*`。
 - `write_file`：创建文件或整体覆盖已有文件。
@@ -87,7 +87,28 @@ answer = agent.ask("解释项目结构")
 
 `from_settings()` 负责装配 `Workspace`、模型客户端、工具注册表和循环依赖；每次 `ask()` 都会创建新的对话上下文、工具调用计数和事件接收器。若需要保存本次运行的 trace/report，应为每次 `ask()` 创建新的 `RunRecorder` 并显式传入。CLI 也通过同一 facade 启动 Agent。
 
-上下文由 `ConversationContext` 管理：system messages 在一次 run 内保持不变，history 按顺序追加用户请求、assistant tool call 和 tool result；每轮请求都会发送完整消息历史。
+每次运行都会组装三条静态 system 消息，顺序固定：
+
+1. **agent 行为规范**：只能使用提供的工具、留在工作区内、写文件要直接调用工具而不是用文字请求批准。这一段跨仓库不变。
+2. **仓库导航图**：扫描得到的目录、重要文件清单、git 状态和运行时环境。
+3. **仓库约定**：读取目标仓库根目录的 `AGENTS.md`（上限 32 KiB，超限截断并标记；符号链接和编码错误一律忽略）。
+
+第 3 条属于**目标仓库**而不是本程序，所以 `--repo` 指向另一个仓库时会自动换成那个仓库自己的约定，不需要改代码；目标仓库没有该文件时静默跳过，只保留前两条。文件在每次运行开始时读取一次并进入静态前缀，因此运行中途修改 `AGENTS.md` 不会影响当前 run。
+
+上下文由 `ConversationContext` 管理：session history 按顺序保存用户请求、assistant tool call 和 tool result；每轮发给模型的是经过预算裁剪的 transcript。旧的 `readfile` 结果会替换为文件摘要，旧的 `search`/`shell` 结果会保留受限元数据；需要细节时模型可使用 `readfile` 的 `start`/`end` 参数重新读取。
+
+压缩分两级：先按本地规则压缩，单个结果超过 2000 字符时改由同一模型的无工具请求生成 `observation` 摘要，请求失败则回退本地规则。同一 run 内每个工具结果最多摘要一次（按 tool call id 缓存），完整结果仍保留在 session history 和 `report.json` 中。被裁剪丢弃的是最旧的 group；当前用户请求不属于历史组，一定会出现在 prompt 末尾。
+
+`readfile` 的 64 KiB 配额作用于**返回内容**而不是源文件：读取 200 KB 的文件并指定 `start`/`end` 可以正常工作。整读或范围读取超出配额时返回 `truncated: true` 和实际返回的 `end` 行号，模型可据此继续读取后续行；只有单行本身就超过配额时才返回 `file_too_large`。不能为了做摘要而整读的文件不会被误记为"已完整读过"。
+
+每次 CLI 调用默认创建新 session。需要跨 run 延续任务时，使用输出中的 session ID：
+
+```powershell
+coding-agent "先检查 README" --repo F:\AgentLabs\httpstat
+coding-agent "继续检查测试" --repo F:\AgentLabs\httpstat --session <session-id>
+```
+
+session 状态保存在目标仓库的 `.coding-agent/sessions/<session-id>.json`，其中包含完整 history、working memory、file summaries 和 episodic notes。`[Memory]` 提供当前任务与文件摘要；`[Relevant Memory]` 按关键词最多召回 3 条历史 note。完整工具结果仍保留在每个 run 的 `report.json` 中。
 
 每次 CLI 提问都会创建一个独立的 run。运行结束后，CLI 会在标准错误中显示 run ID 和 trace 路径：
 

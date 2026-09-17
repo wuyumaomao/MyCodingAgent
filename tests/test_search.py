@@ -41,3 +41,14 @@ def test_search_description_explains_directory_path_requirement(sample_git_repo)
     assert "directory" in tool.description.lower()
     assert "not a file" in tool.description.lower()
     assert "directory" in tool.parameters["properties"]["path"]["description"].lower()
+
+
+def test_search_excludes_agent_and_generated_directories(sample_git_repo):
+    for directory in (".coding-agent", ".pytest_cache", "dist", "build"):
+        target = sample_git_repo / directory
+        target.mkdir()
+        (target / "secret.txt").write_text("needle", encoding="utf-8")
+
+    result = SearchTool(Workspace(sample_git_repo)).execute({"pattern": "needle", "path": "."})
+
+    assert result["matches"] == []

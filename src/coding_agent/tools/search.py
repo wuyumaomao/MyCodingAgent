@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from ..filesystem import _load_ignore_spec
+from ..filesystem import INTERNAL_DIRS, _load_ignore_spec
 from ..repository import Workspace, WorkspaceViolation
 
 
@@ -16,15 +16,17 @@ class SearchTool:
     name = "search"
     description = (
         "Recursively search text content under a repository directory. "
-        "The path must be an existing directory, not a file; use readfile for one known file."
+        "Prefer the smallest known directory (for example src or tests); use the repository root only "
+        "when the file location is unknown. The path must be an existing directory, not a file; "
+        "use readfile for one known file."
     )
     parameters = {
         "type": "object",
         "properties": {
             "pattern": {"type": "string", "description": "Regular expression to search for."},
-            "path": {
+        "path": {
                 "type": "string",
-                "description": "Repository-relative directory to search; must be an existing directory, not a file. Defaults to '.'.",
+                "description": "Repository-relative directory to search; prefer a narrow known directory, and use '.' only when the location is unknown. Must be an existing directory, not a file. Defaults to '.'.",
             },
             "max_results": {"type": "integer", "minimum": 1},
         },
@@ -86,6 +88,14 @@ def _search_with_rg(rg: str, workspace: Workspace, base: Path, pattern: str, max
         "--glob",
         "!.venv/**",
         "--glob",
+        "!.coding-agent/**",
+        "--glob",
+        "!.pytest_cache/**",
+        "--glob",
+        "!dist/**",
+        "--glob",
+        "!build/**",
+        "--glob",
         "!node_modules/**",
         pattern,
         relative_base,
@@ -142,7 +152,7 @@ def _iter_files(workspace: Workspace, base: Path, ignore_spec: Any):
         if not path.is_file() or path.is_symlink():
             continue
         relative = path.relative_to(workspace.root)
-        if ".git" in relative.parts or any(part in {".codex", ".venv", "node_modules"} for part in relative.parts):
+        if any(part in INTERNAL_DIRS for part in relative.parts):
             continue
         if ignore_spec.match_file(relative.as_posix()):
             continue

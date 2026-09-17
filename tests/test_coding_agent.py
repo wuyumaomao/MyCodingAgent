@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import json
+
 from coding_agent.coding_agent import CodingAgent
 from coding_agent.config import Settings
 from coding_agent.models import AssistantTurn, ToolCall
+from coding_agent.repository import Workspace
+from coding_agent.session import SessionStore
 from coding_agent.trace import RunRecorder
 from coding_agent.tools.shell_runner import ShellRunResult
 
@@ -112,3 +116,35 @@ def test_shell_result_is_returned_to_model_as_role_tool(sample_git_repo):
     assert agent.ask("status") == "done"
     assert llm.messages[-1][-1]["role"] == "tool"
     assert "exit_code" in llm.messages[-1][-1]["content"]
+
+
+def test_session_run_wires_the_tool_result_summary_provider(sample_git_repo):
+    """The oversized tool result summarizer must be reachable in production."""
+    (sample_git_repo / "big.txt").write_text("x" * 5000, encoding="utf-8")
+    tool_summaries = []
+
+    class FakeLLMWithSummary(FakeLLM):
+        def complete_text(self, messages):
+            if "工具结果压缩器" in messages[0]["content"]:
+                tool_summaries.append(messages)
+                return '{"observation": "read one very large file"}'
+            return '{"summary": "a text file", "symbols": [], "line_index": []}'
+
+    llm = FakeLLMWithSummary([
+        AssistantTurn(None, [ToolCall("c1", "readfile", {"path": "big.txt"})]),
+        AssistantTurn("done", []),
+    ])
+    workspace = Workspace(sample_git_repo)
+    session_store = SessionStore(workspace)
+    agent = CodingAgent.from_settings(
+        sample_git_repo,
+        Settings(api_key="key", model="model"),
+        llm_client=llm,
+        session=session_store.create(),
+        session_store=session_store,
+    )
+
+    assert agent.ask("inspect") == "done"
+
+    assert tool_summaries, "the oversized tool result was never summarized"
+    assert "read one very large file" in json.dumps(llm.messages[-1], ensure_ascii=False)

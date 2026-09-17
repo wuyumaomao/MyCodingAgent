@@ -9,6 +9,7 @@ from .config import Settings
 from .context import build_repository_context
 from .events import NullEventSink, RecorderEventSink
 from .llm import LLMClient
+from .memory import LLMFileSummaryProvider, LLMToolResultSummaryProvider
 from .repository import Workspace, resolve_repository
 from .tools.approval import WriteApprovalGate, WritePreview
 from .tools.listfiles import ListFilesTool
@@ -22,6 +23,7 @@ from .tools.shell_policy import ShellPolicy
 from .tools.shell_runner import WindowsProcessRunner
 from .tools.writefile import WriteFileTool
 from .trace import RunRecorder
+from .session import SessionState, SessionStore
 
 
 class CodingAgent:
@@ -48,6 +50,8 @@ class CodingAgent:
         shell_policy: ShellPolicy | None = None,
         shell_runner: WindowsProcessRunner | None = None,
         allowed_tools: set[str] | frozenset[str] | None = None,
+        session: SessionState | None = None,
+        session_store: SessionStore | None = None,
     ) -> "CodingAgent":
         repository = resolve_repository(Path(repo))
         workspace = Workspace(repository)
@@ -92,6 +96,10 @@ class CodingAgent:
             registry,
             repository_context_builder,
             limits=limits,
+            session=session,
+            session_store=session_store,
+            summary_provider=(LLMFileSummaryProvider(client.complete_text) if hasattr(client, "complete_text") else None),
+            result_summary_provider=(LLMToolResultSummaryProvider(client.complete_text) if hasattr(client, "complete_text") else None),
         )
         return cls(loop, workspace, registry)
 
@@ -99,6 +107,9 @@ class CodingAgent:
     def limits(self) -> AgentLimits:
         return self.loop.limits
 
-    def ask(self, query: str, *, recorder: RunRecorder | None = None) -> str:
+    def ask(self, query: str, *, recorder: RunRecorder | None = None, session: SessionState | None = None) -> str:
+        if session is not None and session is not self.loop.session:
+            self.loop.session = session
+            self.loop.session_store = SessionStore(self.workspace)
         sink = RecorderEventSink(recorder) if recorder is not None else NullEventSink()
         return self.loop.run(query, self.workspace, event_sink=sink)

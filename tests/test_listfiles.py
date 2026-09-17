@@ -31,3 +31,17 @@ def test_listfiles_rejects_invalid_arguments(sample_git_repo):
     result = ListFilesTool(Workspace(sample_git_repo)).execute({"max_depth": -1})
     assert result["ok"] is False
     assert result["error"]["type"] == "invalid_arguments"
+
+
+def test_scan_files_excludes_agent_and_generated_directories(sample_git_repo):
+    for directory in (".coding-agent", ".codex", ".venv", "__pycache__", ".pytest_cache", "dist", "build"):
+        target = sample_git_repo / directory
+        target.mkdir()
+        (target / "secret.txt").write_text("internal", encoding="utf-8")
+
+    entries, _ = scan_files(Workspace(sample_git_repo))
+    paths = {entry.path for entry in entries}
+
+    assert not any(path.split("/")[0] in {
+        ".coding-agent", ".codex", ".venv", "__pycache__", ".pytest_cache", "dist", "build"
+    } for path in paths)

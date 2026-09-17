@@ -11,6 +11,35 @@ def test_readfile_schema_declares_object_and_required_path():
     assert schema["type"] == "object"
     assert schema["required"] == ["path"]
     assert schema["additionalProperties"] is False
+    assert schema["properties"]["start"]["minimum"] == 1
+    assert schema["properties"]["end"]["minimum"] == 1
+
+
+def test_readfile_reads_one_based_inclusive_range_with_line_numbers(sample_git_repo):
+    target = sample_git_repo / "README.md"
+    target.write_text("zero\none\ntwo\nthree\n", encoding="utf-8")
+    result = ReadFileTool(Workspace(sample_git_repo)).execute(
+        {"path": "README.md", "start": 2, "end": 3}
+    )
+    assert result == {
+        "ok": True,
+        "path": "README.md",
+        "content": "2: one\n3: two",
+        "start": 2,
+        "end": 3,
+        "line_count": 4,
+        "truncated": False,
+    }
+
+
+@pytest.mark.parametrize("arguments", [
+    {"path": "README.md", "start": 0},
+    {"path": "README.md", "end": 0},
+    {"path": "README.md", "start": 4, "end": 3},
+])
+def test_readfile_rejects_invalid_line_range(sample_git_repo, arguments):
+    result = ReadFileTool(Workspace(sample_git_repo)).execute(arguments)
+    assert result["error"]["type"] == "invalid_arguments"
 
 
 def test_readfile_returns_utf8_text(sample_git_repo):
@@ -44,6 +73,47 @@ def test_readfile_rejects_oversized_file(sample_git_repo):
     (sample_git_repo / "large.txt").write_text("123456", encoding="utf-8")
     result = ReadFileTool(Workspace(sample_git_repo), max_bytes=5).execute({"path": "large.txt"})
     assert result["error"]["type"] == "file_too_large"
+
+
+def test_readfile_reads_a_line_range_from_a_file_above_the_old_cap(sample_git_repo):
+    """The quota must limit the returned range, not the size of the source file."""
+    target = sample_git_repo / "big.py"
+    target.write_text("\n".join(f"line {number}" for number in range(20000)), encoding="utf-8")
+    assert target.stat().st_size > 64 * 1024
+
+    result = ReadFileTool(Workspace(sample_git_repo)).execute({"path": "big.py", "start": 1, "end": 5})
+
+    assert result["ok"] is True
+    assert result["content"] == "1: line 0\n2: line 1\n3: line 2\n4: line 3\n5: line 4"
+    assert result["start"] == 1
+    assert result["end"] == 5
+    assert result["line_count"] == 20000
+    assert result["truncated"] is False
+
+
+def test_readfile_reads_a_middle_range_from_a_large_file(sample_git_repo):
+    target = sample_git_repo / "big.py"
+    target.write_text("\n".join(f"line {number}" for number in range(20000)), encoding="utf-8")
+
+    result = ReadFileTool(Workspace(sample_git_repo)).execute({"path": "big.py", "start": 19999, "end": 20000})
+
+    assert result["ok"] is True
+    assert result["content"] == "19999: line 19998\n20000: line 19999"
+    assert result["line_count"] == 20000
+
+
+def test_readfile_truncates_content_at_the_result_quota(sample_git_repo):
+    target = sample_git_repo / "many.txt"
+    target.write_text("\n".join(f"row {number}" for number in range(100)), encoding="utf-8")
+
+    result = ReadFileTool(Workspace(sample_git_repo), max_bytes=40).execute({"path": "many.txt"})
+
+    assert result["ok"] is True
+    assert result["truncated"] is True
+    assert result["start"] == 1
+    assert result["end"] < result["line_count"]
+    assert len(result["content"].encode("utf-8")) <= 40
+    assert result["line_count"] == 100
 
 
 def test_readfile_rejects_invalid_arguments(sample_git_repo):

@@ -49,6 +49,15 @@ def test_llm_client_keeps_final_content(monkeypatch):
     assert turn.tool_calls == []
 
 
+def test_llm_client_complete_text_uses_no_tools_and_returns_content(monkeypatch):
+    captured = {}
+    response = SimpleNamespace(choices=[SimpleNamespace(finish_reason="stop", message=SimpleNamespace(content='{"summary":"CLI"}', tool_calls=[]))])
+    client = LLMClient(api_key="key", model="model", base_url="https://example.test")
+    monkeypatch.setattr(client, "_request", lambda messages, tools: (captured.update(messages=messages, tools=tools) or response))
+    assert client.complete_text([{"role": "system", "content": "summarize"}]) == '{"summary":"CLI"}'
+    assert captured["tools"] == []
+
+
 def test_llm_client_disables_sdk_retries(monkeypatch):
     captured = {}
 

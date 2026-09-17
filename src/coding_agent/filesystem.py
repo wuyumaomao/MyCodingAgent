@@ -16,6 +16,22 @@ class FileEntry:
     size: int | None
 
 
+# Directories created by the agent or common build tools are not project source.
+# They are hidden from repository manifests regardless of the target project's .gitignore.
+INTERNAL_DIRS = frozenset({
+    ".git",
+    ".coding-agent",
+    ".codex",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".pytest_cache",
+    "node_modules",
+    "dist",
+    "build",
+})
+
+
 def _load_ignore_spec(root: Path) -> pathspec.PathSpec:
     ignore_file = root / ".gitignore"
     try:
@@ -60,7 +76,7 @@ def scan_files(
                 truncated = True
                 return
             relative = child.relative_to(workspace.root)
-            if ".git" in relative.parts:
+            if any(part in INTERNAL_DIRS for part in relative.parts):
                 continue
             is_directory = child.is_dir()
             if is_ignored(relative, is_directory):
