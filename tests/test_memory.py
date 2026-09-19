@@ -6,9 +6,9 @@ import pytest
 from coding_agent.memory import (
     FILE_SUMMARY_SYSTEM_PROMPT,
     LLMFileSummaryProvider,
-    LLMToolResultSummaryProvider,
     MemoryManager,
     _keywords,
+    fallback_symbols,
 )
 from coding_agent.models import ToolCall
 from coding_agent.session import SessionState, empty_memory
@@ -21,8 +21,83 @@ def make_memory():
 def test_full_read_creates_summary_and_recent_file():
     memory = make_memory()
     memory.observe_tool_result(ToolCall("1", "readfile", {"path": "a.py"}), {"ok": True, "path": "a.py", "content": "1: def main():\n2:     pass", "start": 1, "end": 2, "line_count": 2}, run_id="r", round_number=1)
-    assert memory.data["working_memory"]["recent_files"] == ["a.py"]
+    assert memory.data["working_memory"]["recent_read_files"] == ["a.py"]
     assert len(memory.data["file_summaries"]["a.py"]["freshness"]) == 64
+
+
+def test_listing_a_directory_does_not_count_as_reading_a_file():
+    """`recent_files` 曾经把 listfiles/find_files 结果里的目录也记进来。
+
+    于是这一栏会变成 "httpstat.py, kb, tests, ."——目录混在文件里，渲染出去
+    就是一行噪音。只有真正用 readfile 读过内容的路径才算"读过"。
+    """
+    memory = make_memory()
+    memory.observe_tool_result(
+        ToolCall("1", "readfile", {"path": "a.py"}),
+        {"ok": True, "path": "a.py", "content": "1: x", "start": 1, "end": 1, "line_count": 1},
+        run_id="r",
+        round_number=1,
+    )
+    memory.observe_tool_result(
+        ToolCall("2", "listfiles", {"path": "."}),
+        {"ok": True, "path": ".", "files": ["a.py", "kb"], "truncated": False},
+        run_id="r",
+        round_number=1,
+    )
+    memory.observe_tool_result(
+        ToolCall("3", "find_files", {"pattern": "*.py"}),
+        {"ok": True, "path": "kb", "files": ["kb/b.py"], "truncated": False},
+        run_id="r",
+        round_number=1,
+    )
+    memory.observe_tool_result(
+        ToolCall("4", "readfile", {"path": "missing.py"}),
+        {"ok": False, "error": {"type": "file_not_found", "message": "File not found"}},
+        run_id="r",
+        round_number=1,
+    )
+
+    assert memory.data["working_memory"]["recent_read_files"] == ["a.py"]
+
+
+def test_memory_block_renders_the_files_the_model_read():
+    """读过哪些文件必须发进 prompt。
+
+    历史里的 readfile 结果会被段落压缩吃掉，[Memory] 不会被——所以这一栏是压缩
+    之后模型唯一还能知道"这个文件我已经读过了"的地方。
+    """
+    memory = make_memory()
+    for index, path in enumerate(("a.py", "b.py")):
+        memory.observe_tool_result(
+            ToolCall(str(index), "readfile", {"path": path}),
+            {"ok": True, "path": path, "content": "1: x", "start": 1, "end": 1, "line_count": 1},
+            run_id="r",
+            round_number=1,
+        )
+
+    rendered = memory.render_memory()
+
+    assert "recent_read_files: b.py, a.py" in rendered
+    assert "recent_modified_files: none" in rendered
+
+
+def test_recent_read_files_is_capped_and_moves_the_latest_to_the_front():
+    """最近读的排最前，且这一栏不能无限长（它每轮都要重发）。"""
+    memory = make_memory()
+    for index in range(14):
+        path = f"f{index}.py"
+        memory.observe_tool_result(
+            ToolCall(str(index), "readfile", {"path": path}),
+            {"ok": True, "path": path, "content": "1: x", "start": 1, "end": 1, "line_count": 1},
+            run_id="r",
+            round_number=1,
+        )
+
+    recorded = memory.data["working_memory"]["recent_read_files"]
+
+    assert len(recorded) == 10
+    assert recorded[0] == "f13.py"
+    assert "f0.py" not in recorded
 
 
 def test_patch_invalidates_summary():
@@ -193,21 +268,17 @@ def test_note_recall_keeps_using_stored_keywords():
 
 
 def test_tool_note_is_recallable_by_chinese_query():
-    """End to end: the note written by a tool result carries Chinese content.
-
-    The stored keywords are ASCII tool/path names, so only the note text can
-    match a Chinese requirement.
-    """
+    """A note whose keywords are ASCII-only is recalled through its Chinese text."""
     memory = make_memory()
-    memory.observe_tool_result(
-        ToolCall("1", "readfile", {"path": "src/shell_policy.py"}),
-        {"ok": True, "path": "src/shell_policy.py", "content": "1: x", "start": 1, "end": 1, "line_count": 1},
-        run_id="r",
-        round_number=1,
-        raw_content="x\n",
-    )
+    memory.data["episodic_notes"] = [
+        {
+            "id": "note-1",
+            "content": "已检查文件 src/shell_policy.py",
+            "keywords": ["py", "readfile", "shell_policy", "src"],
+            "created_at": "1",
+        }
+    ]
 
-    assert memory.data["episodic_notes"][0]["keywords"] == ["py", "readfile", "shell_policy", "src"]
     assert [note["id"] for note in memory.retrieve_relevant("检查过的文件有哪些")] == ["note-1"]
 
 
@@ -220,9 +291,35 @@ def test_error_note_is_not_recalled_by_an_unrelated_query():
     """
     memory = make_memory()
     memory.begin_run("检查一下这个仓库")
+    memory.data["episodic_notes"] = [
+        {"id": "note-1", "content": "已检查文件 src/shell_policy.py", "keywords": ["py", "readfile", "shell_policy", "src"], "created_at": "1"},
+        {"id": "note-2", "content": "shell 失败：approval_denied - 用户拒绝了命令", "keywords": ["shell", "approval_denied"], "created_at": "2"},
+    ]
+
+    assert [note["id"] for note in memory.retrieve_relevant("检查过的文件")] == ["note-1"]
+
+
+def test_task_summary_still_drives_note_recall():
+    """A terse follow-up still recalls notes through the run task summary."""
+    memory = make_memory()
+    memory.begin_run("检查 shell 策略层")
+    memory.data["episodic_notes"] = [
+        {"id": "note-1", "content": "已检查文件 src/shell_policy.py", "keywords": ["py", "readfile", "shell_policy", "src"], "created_at": "1"},
+    ]
+
+    assert [note["id"] for note in memory.retrieve_relevant("继续")] == ["note-1"]
+
+
+def test_episodic_notes_are_frozen():
+    """Note writing is frozen: tool results no longer create notes.
+
+    The recall path stays alive so sessions written before the freeze keep
+    working.
+    """
+    memory = make_memory()
     memory.observe_tool_result(
-        ToolCall("1", "readfile", {"path": "src/shell_policy.py"}),
-        {"ok": True, "path": "src/shell_policy.py", "content": "1: x", "start": 1, "end": 1, "line_count": 1},
+        ToolCall("1", "readfile", {"path": "a.py"}),
+        {"ok": True, "path": "a.py", "content": "1: x", "start": 1, "end": 1, "line_count": 1},
         run_id="r",
         round_number=1,
         raw_content="x\n",
@@ -234,22 +331,12 @@ def test_error_note_is_not_recalled_by_an_unrelated_query():
         round_number=2,
     )
 
-    assert [note["id"] for note in memory.retrieve_relevant("检查过的文件")] == ["note-1"]
+    assert memory.data["episodic_notes"] == []
 
-
-def test_task_summary_still_drives_note_recall():
-    """A terse follow-up still recalls notes through the run task summary."""
-    memory = make_memory()
-    memory.begin_run("检查 shell 策略层")
-    memory.observe_tool_result(
-        ToolCall("1", "readfile", {"path": "src/shell_policy.py"}),
-        {"ok": True, "path": "src/shell_policy.py", "content": "1: x", "start": 1, "end": 1, "line_count": 1},
-        run_id="r",
-        round_number=1,
-        raw_content="x\n",
+    memory.data["episodic_notes"].append(
+        {"id": "note-1", "content": "已检查文件 a.py", "keywords": ["readfile"], "created_at": "1"}
     )
-
-    assert [note["id"] for note in memory.retrieve_relevant("继续")] == ["note-1"]
+    assert [note["id"] for note in memory.retrieve_relevant("readfile")] == ["note-1"]
 
 
 def test_truncated_read_does_not_create_a_file_summary():
@@ -289,21 +376,124 @@ def test_latest_tool_error_is_cleared_by_a_successful_tool_result():
     assert "latest_tool_error" not in memory.render_memory()
 
 
-def test_tool_result_summary_provider_returns_validated_observation():
-    captured = []
+def test_tool_result_summary_provider_is_gone():
+    """单个工具结果不再走 LLM 压缩：确定性优先，只保留段落交接摘要。"""
+    import coding_agent.memory as memory_module
 
-    def complete_text(messages):
-        captured.append(messages)
-        return '{"observation":"pytest passed 54 tests"}'
-
-    summary = LLMToolResultSummaryProvider(complete_text)("shell", {"ok": True, "stdout": "..."})
-
-    assert summary == {"ok": True, "observation": "pytest passed 54 tests"}
-    assert "工具结果压缩器" in captured[0][0]["content"]
+    assert not hasattr(memory_module, "LLMToolResultSummaryProvider")
+    assert hasattr(memory_module, "LLMSpanSummaryProvider")
+    assert hasattr(memory_module, "LLMFileSummaryProvider")
 
 
-def test_tool_result_summary_provider_rejects_invalid_json():
-    provider = LLMToolResultSummaryProvider(lambda messages: "not json")
+def test_file_summary_provider_tolerates_fences_and_prose():
+    """模型多包一层代码块或前后多说一句，不该让整份摘要降级。"""
+    payload = '{"summary":"命令行入口","symbols":["main"],"line_index":[{"lines":"1-2","desc":"入口"}]}'
+
+    for raw in (f"```json\n{payload}\n```", f"好的，这是摘要：\n{payload}", f"```\n{payload}\n```\n希望有帮助。"):
+        provider = LLMFileSummaryProvider(lambda messages, raw=raw: raw)
+        summary = provider("a.py", "def main(): pass", {})
+        assert summary["summary"] == "命令行入口"
+        assert summary["symbols"] == ["main"]
+
+
+def test_file_summary_provider_treats_null_as_empty():
+    """模型用 null 表示"没有符号"是合法答案，不是错误。"""
+    provider = LLMFileSummaryProvider(lambda messages: '{"summary":"规划文档","symbols":null,"line_index":null}')
+
+    summary = provider("AGENTS.md", "# 规划\n", {})
+
+    assert summary["summary"] == "规划文档"
+    assert summary["symbols"] == []
+    assert summary["line_index"] == []
+
+
+def test_file_summary_provider_still_rejects_a_missing_summary():
+    provider = LLMFileSummaryProvider(lambda messages: '{"symbols":["a"]}')
 
     with pytest.raises(ValueError):
-        provider("shell", {"ok": True})
+        provider("a.py", "x", {})
+
+
+def test_line_index_accepts_common_key_variants():
+    """模型可能写成 range/description，或拆成 start+end；这些都该被接受。"""
+    raw = json.dumps({
+        "summary": "入口",
+        "symbols": [{"name": "main"}],
+        "line_index": [
+            {"range": "1-7", "description": "导入"},
+            {"start": 12, "end": 24, "desc": "parse_bool"},
+            {"line": "30", "summary": "pop_arg"},
+        ],
+    }, ensure_ascii=False)
+    provider = LLMFileSummaryProvider(lambda messages: raw)
+
+    summary = provider("a.py", "x", {})
+
+    assert summary["symbols"] == ["main"]
+    assert summary["line_index"] == [
+        {"lines": "1-7", "desc": "导入"},
+        {"lines": "12-24", "desc": "parse_bool"},
+        {"lines": "30", "desc": "pop_arg"},
+    ]
+
+
+def test_malformed_line_index_entries_are_dropped_not_fatal():
+    """一个条目格式不对，不该让整份摘要（含正确的 summary 和 symbols）作废。"""
+    raw = json.dumps({
+        "summary": "命令行入口",
+        "symbols": ["main", "parse_slo"],
+        "line_index": [
+            {"lines": "1-7", "desc": "导入"},
+            "这不是对象",
+            {"range": "12-24"},
+            {"lines": "30-40", "desc": "check_slo"},
+        ],
+    }, ensure_ascii=False)
+    provider = LLMFileSummaryProvider(lambda messages: raw)
+
+    summary = provider("a.py", "x", {})
+
+    assert summary["summary"] == "命令行入口"
+    assert summary["symbols"] == ["main", "parse_slo"]
+    assert summary["line_index"] == [{"lines": "1-7", "desc": "导入"}, {"lines": "30-40", "desc": "check_slo"}]
+
+
+def test_fallback_summary_extracts_symbols_without_the_model():
+    """降级也要保住符号召回能力。"""
+    content = "import os\n\nclass Env:\n    pass\n\ndef main():\n    pass\n\n    def helper():\n        pass\n"
+
+    symbols = fallback_symbols(content)
+
+    assert symbols[:3] == ["Env", "main", "helper"]
+
+
+def test_failed_file_summary_is_visible_and_marked():
+    """失败必须留下事件，并且降级产物要能被识别出来。"""
+    events = []
+
+    class Sink:
+        def emit(self, event_type, **payload):
+            events.append((event_type, payload))
+
+    def broken(path, content, result):
+        raise ValueError("FileSummary response was not valid JSON")
+
+    memory = MemoryManager(make_memory().session, summary_provider=broken, event_sink=Sink())
+    memory.observe_tool_result(
+        ToolCall("1", "readfile", {"path": "a.py"}),
+        {"ok": True, "path": "a.py", "content": "1: class Env:", "start": 1, "end": 3, "line_count": 3},
+        run_id="r",
+        round_number=1,
+        raw_content="class Env:\n    pass\n\ndef main():\n    pass\n",
+    )
+
+    failures = [payload for event_type, payload in events if payload.get("kind") == "file_summary_failed"]
+    assert failures and failures[0]["path"] == "a.py"
+
+    stored = memory.data["file_summaries"]["a.py"]
+    assert stored["fallback"] is True
+    assert stored["symbols"] == ["Env", "main"]
+
+    memory.data["working_memory"]["task_summary"] = "查看 Env"
+    rendered = memory.render_file_summaries("Env")
+    assert "[fallback summary" in rendered

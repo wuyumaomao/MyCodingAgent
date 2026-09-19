@@ -15,10 +15,11 @@ class SearchTool:
 
     name = "search"
     description = (
-        "Recursively search text content under a repository directory. "
+        "Recursively search text content under a repository path. "
+        "Use this to locate a definition or a call site before reading, and read one medium range "
+        "around the hits rather than one tiny range per hit. "
         "Prefer the smallest known directory (for example src or tests); use the repository root only "
-        "when the file location is unknown. The path must be an existing directory, not a file; "
-        "use readfile for one known file."
+        "when the file location is unknown. A file path is also accepted and searches just that file."
     )
     parameters = {
         "type": "object",
@@ -26,7 +27,7 @@ class SearchTool:
             "pattern": {"type": "string", "description": "Regular expression to search for."},
         "path": {
                 "type": "string",
-                "description": "Repository-relative directory to search; prefer a narrow known directory, and use '.' only when the location is unknown. Must be an existing directory, not a file. Defaults to '.'.",
+                "description": "Repository-relative path to search: a directory (searched recursively) or a single file. Prefer a narrow known path, and use '.' only when the location is unknown. Defaults to '.'.",
             },
             "max_results": {"type": "integer", "minimum": 1},
         },
@@ -59,8 +60,11 @@ class SearchTool:
             base = self.workspace.resolve_relative(path)
         except WorkspaceViolation:
             return _error("workspace_violation", "Path must stay inside the repository")
-        if not base.is_dir():
-            return _error("not_a_directory", "Search path is not a directory")
+        # 模型经常把已知文件直接当 path 传进来。报错只会白费一轮，直接搜那个文件。
+        if not base.exists():
+            return _error("path_not_found", "Search path does not exist")
+        if not base.is_dir() and not base.is_file():
+            return _error("not_a_directory", "Search path is neither a file nor a directory")
 
         try:
             re.compile(pattern)
@@ -68,7 +72,11 @@ class SearchTool:
             return _error("invalid_arguments", "Pattern is not a valid regular expression")
 
         rg = shutil.which("rg")
-        if rg:
+        # For a single file, use the Python path directly.  ripgrep applies
+        # repository/global ignore rules even when a newly-created file is
+        # passed explicitly, which can make a known file appear to have no
+        # matches.  The Python iterator already handles the exact-file case.
+        if rg and base.is_dir():
             return _search_with_rg(rg, self.workspace, base, pattern, max_results)
         return _search_with_python(self.workspace, base, pattern, max_results)
 
@@ -148,7 +156,8 @@ def _search_with_python(workspace: Workspace, base: Path, pattern: str, max_resu
 
 
 def _iter_files(workspace: Workspace, base: Path, ignore_spec: Any):
-    for path in sorted(base.rglob("*"), key=lambda item: item.relative_to(workspace.root).as_posix()):
+    candidates = [base] if base.is_file() else sorted(base.rglob("*"), key=lambda item: item.relative_to(workspace.root).as_posix())
+    for path in candidates:
         if not path.is_file() or path.is_symlink():
             continue
         relative = path.relative_to(workspace.root)

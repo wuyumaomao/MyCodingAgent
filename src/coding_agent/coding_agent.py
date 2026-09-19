@@ -9,7 +9,7 @@ from .config import Settings
 from .context import build_repository_context
 from .events import NullEventSink, RecorderEventSink
 from .llm import LLMClient
-from .memory import LLMFileSummaryProvider, LLMToolResultSummaryProvider
+from .memory import LLMFileSummaryProvider, LLMSpanSummaryProvider
 from .repository import Workspace, resolve_repository
 from .tools.approval import WriteApprovalGate, WritePreview
 from .tools.listfiles import ListFilesTool
@@ -52,6 +52,7 @@ class CodingAgent:
         allowed_tools: set[str] | frozenset[str] | None = None,
         session: SessionState | None = None,
         session_store: SessionStore | None = None,
+        transcript_budget_chars: int | None = None,
     ) -> "CodingAgent":
         repository = resolve_repository(Path(repo))
         workspace = Workspace(repository)
@@ -99,7 +100,8 @@ class CodingAgent:
             session=session,
             session_store=session_store,
             summary_provider=(LLMFileSummaryProvider(client.complete_text) if hasattr(client, "complete_text") else None),
-            result_summary_provider=(LLMToolResultSummaryProvider(client.complete_text) if hasattr(client, "complete_text") else None),
+            compaction_summarizer=(LLMSpanSummaryProvider(client.complete_text) if hasattr(client, "complete_text") else None),
+            transcript_budget_chars=transcript_budget_chars,
         )
         return cls(loop, workspace, registry)
 

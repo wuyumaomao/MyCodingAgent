@@ -183,7 +183,8 @@ def test_loop_retries_llm_api_within_same_round_and_records_metadata(sample_git_
     assert response["round"] == 1
 
 
-def test_loop_rejects_tool_after_per_tool_limit(sample_git_repo):
+def test_loop_rejects_identical_repeated_read(sample_git_repo):
+    """重复检测取代了按工具计数：同一个调用第二次就被拒绝。"""
     llm = FakeLLM(
         [
             AssistantTurn(None, [ToolCall(f"c{i}", "readfile", {"path": "README.md"})])
@@ -193,9 +194,42 @@ def test_loop_rejects_tool_after_per_tool_limit(sample_git_repo):
     AgentLoop(
         llm,
         make_registry(sample_git_repo),
-        limits=AgentLimits(max_rounds=5, max_calls_per_tool=3),
+        limits=AgentLimits(max_rounds=5),
     ).run("read", Workspace(sample_git_repo))
     assert llm.messages[-1][-1]["role"] == "tool"
+    assert "repeated_tool_call" in llm.messages[-1][-1]["content"]
+
+
+def test_loop_allows_many_distinct_reads(sample_git_repo):
+    """读同一个文件的不同区间不算重复，不该被拦。"""
+    llm = FakeLLM(
+        [
+            AssistantTurn(None, [ToolCall(f"c{i}", "readfile", {"path": "README.md", "start": i + 1, "end": i + 1})])
+            for i in range(4)
+        ] + [AssistantTurn("done", [])]
+    )
+    AgentLoop(
+        llm,
+        make_registry(sample_git_repo),
+        limits=AgentLimits(max_rounds=5),
+    ).run("read", Workspace(sample_git_repo))
+    assert "repeated_tool_call" not in llm.messages[-1][-1]["content"]
+    assert llm.messages[-1][-1]["role"] == "tool"
+
+
+def test_loop_safety_valve_still_stops_runaway_calls(sample_git_repo):
+    """计数上限退化成安全阀，但仍能兜住异常行为。"""
+    llm = FakeLLM(
+        [
+            AssistantTurn(None, [ToolCall(f"c{i}", "listfiles", {"path": f"dir{i}"})])
+            for i in range(4)
+        ] + [AssistantTurn("done", [])]
+    )
+    AgentLoop(
+        llm,
+        make_registry(sample_git_repo),
+        limits=AgentLimits(max_rounds=5, max_calls_per_tool=2),
+    ).run("read", Workspace(sample_git_repo))
     assert "tool_call_limit" in llm.messages[-1][-1]["content"]
 
 

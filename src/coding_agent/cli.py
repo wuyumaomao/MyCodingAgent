@@ -27,7 +27,13 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--model")
     parser.add_argument("--base-url")
     parser.add_argument("--timeout", type=float)
-    parser.add_argument("--max-tool-calls", type=int, default=3)
+    parser.add_argument("--max-tool-calls", type=int, default=30, help="Safety valve on calls per tool; repeat detection is the primary limit")
+    parser.add_argument(
+        "--transcript-budget",
+        type=int,
+        default=None,
+        help="Override the history-view character budget (default 120000); lower it to force compaction for testing",
+    )
     parser.add_argument("--shell-timeout", type=float, default=60.0)
     parser.add_argument("--session")
     return parser
@@ -58,6 +64,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             llm_client_factory=LLMClient,
             session=session,
             session_store=session_store,
+            transcript_budget_chars=args.transcript_budget,
         )
         service = AgentService(agent)
         service.recorder = recorder
@@ -98,6 +105,8 @@ def _ask_write_approval(preview: WritePreview) -> bool:
     print(f"Path: {preview.path}", file=sys.stderr)
     if preview.existed:
         print("WARNING: this will overwrite an existing file.", file=sys.stderr)
+    if preview.creates_directories:
+        print(f"Will also create directories: {', '.join(preview.creates_directories)}", file=sys.stderr)
     if preview.content is not None:
         print("Content preview:", file=sys.stderr)
         print(_preview_text(preview.content), file=sys.stderr)

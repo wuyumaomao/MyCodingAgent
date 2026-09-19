@@ -66,8 +66,7 @@ class WriteFileTool:
                 return _error("workspace_violation", "Symbolic links are not allowed")
             if existed and not target.is_file():
                 return _error("permission_denied", "Target is not a regular file")
-            if not target.parent.is_dir():
-                return _error("parent_not_found", "Parent directory does not exist")
+            missing_directories = _missing_parents(self.workspace, target.parent)
         except OSError:
             return _error("permission_denied", "Target cannot be inspected")
 
@@ -77,6 +76,7 @@ class WriteFileTool:
             path=_display_path(self.workspace, target),
             content=content,
             existed=existed,
+            creates_directories=missing_directories,
         )
         decision = self.approval_gate.approve(preview)
         if decision == "required":
@@ -85,17 +85,28 @@ class WriteFileTool:
             return _error("approval_denied", "User denied the file write")
 
         try:
+            # 父目录不存在时自己建，而不是回一句"父目录不存在"让模型去绕路。
+            # 真实 run 里那条错误让模型花了 6 轮：两次 `python -c os.makedirs` 被
+            # shell 策略拒，然后写临时脚本、跑它、才写成文件。审批门已经把这个
+            # 副作用（creates_directories）显示给用户了，所以这里是经过同意的。
+            if missing_directories:
+                target.parent.mkdir(parents=True, exist_ok=True)
             bytes_written = self.writer.write(target, content)
         except PermissionError:
             return _error("permission_denied", "File cannot be written")
+        except OSError:
+            return _error("permission_denied", "Parent directory cannot be created")
         except WriteError:
             return _error("write_error", "File could not be written")
-        return {
+        result = {
             "ok": True,
             "path": _display_path(self.workspace, target),
             "operation": operation,
             "bytes_written": bytes_written,
         }
+        if missing_directories:
+            result["created_directories"] = list(missing_directories)
+        return result
 
 
 def _lexical_path(workspace: Workspace, path: str) -> Path:
@@ -114,6 +125,23 @@ def _has_symlink_component(path: Path, root: Path) -> bool:
         if current.is_symlink():
             return True
     return False
+
+
+def _missing_parents(workspace: Workspace, parent: Path) -> tuple[str, ...]:
+    """Repository-relative paths of the directories that would have to be created.
+
+    Returns them outermost-first so the approval preview reads like the order they
+    will actually be created in (``docs``, then ``docs/notes``, …).
+    """
+    missing: list[str] = []
+    current = parent
+    while current != workspace.root and workspace.root in current.parents:
+        if current.exists():
+            break
+        missing.append(_display_path(workspace, current))
+        current = current.parent
+    missing.reverse()
+    return tuple(missing)
 
 
 def _display_path(workspace: Workspace, target: Path) -> str:

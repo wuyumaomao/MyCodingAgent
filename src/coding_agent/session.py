@@ -21,7 +21,9 @@ class SessionError(RuntimeError):
 
 
 def empty_memory() -> dict[str, Any]:
-    return {"working_memory": {"task_summary": "", "constraints": [], "recent_files": [], "latest_tool_error": None}, "file_summaries": {}, "episodic_notes": []}
+    # recent_read_files 只记 readfile 成功读过的文件；recent_modified_files 只记写工具
+    # 改过的文件。两者都渲染进 [Memory]，所以必须是两个字段。
+    return {"working_memory": {"task_summary": "", "constraints": [], "recent_read_files": [], "recent_modified_files": [], "latest_tool_error": None}, "file_summaries": {}, "episodic_notes": []}
 
 
 @dataclass

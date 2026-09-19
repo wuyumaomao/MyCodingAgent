@@ -31,6 +31,8 @@
 
 ## 已知边界
 
-- `shell` 只允许 `python` / `pytest` / `git` / `npm` / `uv` 的白名单子命令；只读 git 查询自动放行，其余需要批准。
-- `readfile` 单次返回上限 64 KiB：超出时返回 `truncated: true` 与实际行号，用 `start` / `end` 继续读取。
-- 每个工具默认最多调用 3 次，可用 `--max-tool-calls` 调整。
+- `shell` 只允许 `python` / `pytest` / `git` / `npm` / `uv` 的白名单子命令；只读 git 查询自动放行，`python -c <代码>`（含 `uv run python -c`）需要批准，其余也都要批准。`-c` 的**代码那一格跳过 shell 元字符检查**（那是数据不是 shell 语法，runner 用 `shell=False` + argv 启动），其余 token 照旧严查；`python -m` 和裸 flag 仍然拒绝。
+- `readfile` 有两条返回上限，谁先到算谁：**2000 行**（`max_lines`）和 **64 KiB 字节**（作用于返回内容，不是源文件）。每个成功结果带一条 footer，明确写出下一段该用哪个 `start`；读到文件尾报 `End of file - total N lines`。单行超过 2000 字符会被截断并标记，不再让整个读取失败。源文件总量上限（64 MiB）**只挡整读**——带了 `start`/`end` 就放行（流式扫描，范围外的行不保留）。
+- `write_file` 会自己建出缺失的父目录，并把要建的目录列进审批预览；只允许工作区内、非符号链接路径，单文件上限 64 KiB。
+- 两级压缩的预算在 `context.py`，**由模型窗口推导，不要拍绝对数字**：`DEFAULT_CONTEXT_WINDOW_TOKENS = 1_000_000`（deepseek-flash）→ `derive_transcript_budget` 算出 `transcript_budget_chars`（684,000），触发线是它的 0.8 倍（547,200）。推导公式 `窗口 × CHARS_PER_TOKEN(3.5) × PROMPT_BUDGET_RATIO(0.20) − FIXED_PROMPT_OVERHEAD_CHARS(16,000)`；换模型改窗口常量，`--transcript-budget` / `context_window_tokens` 可覆盖。**单结果在摄入时原样保存，只有视图越线后才按需修剪**（`_prune_to_fit`，从最大的开始、只修到装得下为止；一轮不够就把目标减半再来一轮，直到 `_MIN_TIGHTEN_CHARS`）——摄入时截断会让一个 22.7 KB 的文件在 684 KB 的视图里也被切成 4 段。两条硬约束：**触发线 / 单结果配额 ≥ 8**，以及**触发线 > 压缩目标 + 摘要上限 + 台账上限**（否则压缩抖动）。
+- 工具调用按**重复**判定：只读工具的完全相同调用再次出现会被拒绝（`repeated_tool_call`），写工具与 `shell` 不参与。`--max-tool-calls`（默认 30）只是安全阀，`tool_call_limit` 正常不该出现。

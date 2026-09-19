@@ -25,7 +25,9 @@ class AgentError(RuntimeError):
 @dataclass(frozen=True)
 class AgentLimits:
     max_rounds: int = 20
-    max_calls_per_tool: int = 3
+    # 安全阀而非工作预算：重复检测才是主要机制（见 ToolExecutor）。
+    # 读一个几百行的文件需要多次区间读取，默认值必须远高于此。
+    max_calls_per_tool: int = 30
     max_llm_retries: int = 1
 
     def __post_init__(self) -> None:
@@ -50,10 +52,12 @@ class AgentLoop:
         session: SessionState | None = None,
         session_store: SessionStore | None = None,
         summary_provider: Callable[[str, str, dict[str, Any]], dict[str, Any]] | None = None,
-        result_summary_provider: Callable[[str, dict[str, Any]], dict[str, Any]] | None = None,
+        compaction_summarizer: Callable[[list[dict[str, Any]]], str] | None = None,
+        transcript_budget_chars: int | None = None,
     ) -> None:
         if limits is not None and max_rounds is not None:
             raise ValueError("Pass limits or max_rounds, not both")
+        self.transcript_budget_chars = transcript_budget_chars
         self.limits = limits or AgentLimits(max_rounds=max_rounds or 20)
         self.llm_client = llm_client
         self.model_gateway = ModelGateway(llm_client, max_retries=self.limits.max_llm_retries)
@@ -64,25 +68,32 @@ class AgentLoop:
         self.session = session
         self.session_store = session_store
         self.summary_provider = summary_provider
-        self.result_summary_provider = result_summary_provider
+        self.compaction_summarizer = compaction_summarizer
 
     def run(self, query: str, workspace: Workspace, *, event_sink: Any | None = None) -> str:
+        sink = event_sink or (RecorderEventSink(self.recorder) if self.recorder else NullEventSink())
         #构造prompt前缀
-        memory = MemoryManager(self.session, summary_provider=self.summary_provider) if self.session is not None else None
+        memory = MemoryManager(self.session, summary_provider=self.summary_provider, event_sink=sink) if self.session is not None else None
         context = ConversationContext(
             workspace,
             self.repository_context_builder,
             memory=memory,
-            result_summary_provider=self.result_summary_provider,
+            compaction_summarizer=self.compaction_summarizer,
+            event_sink=sink,
+            **({"transcript_budget_chars": self.transcript_budget_chars} if self.transcript_budget_chars else {}),
         )
         if self.session is not None:
             context.history = self.session.history
             memory.begin_run(query)
         context.add_user_request(query)
-        sink = event_sink or (RecorderEventSink(self.recorder) if self.recorder else NullEventSink())
         tool_executor = ToolExecutor(self.registry, self.limits, sink)
+        seen_compaction = 0
         for round_number in range(1, self.max_rounds + 1):
             messages = context.messages(query if memory is not None else None)#获取要发送的信息
+            if context.compaction_serial != seen_compaction:
+                # 压缩把旧工具结果换成了摘要，被压掉的结果可以重新读取。
+                seen_compaction = context.compaction_serial
+                tool_executor.forget_signatures()
             tool_definitions = self.registry.definitions()
             # Measure the prompt already built for this round; rebuilding it would
             # re-run the tool result summarizer.

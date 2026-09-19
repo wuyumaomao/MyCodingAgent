@@ -118,20 +118,26 @@ def test_shell_result_is_returned_to_model_as_role_tool(sample_git_repo):
     assert "exit_code" in llm.messages[-1][-1]["content"]
 
 
-def test_session_run_wires_the_tool_result_summary_provider(sample_git_repo):
-    """The oversized tool result summarizer must be reachable in production."""
-    (sample_git_repo / "big.txt").write_text("x" * 5000, encoding="utf-8")
+def test_session_run_keeps_large_shell_output_verbatim_without_calling_the_model(sample_git_repo):
+    """单结果**摄入时不截断**：工具自己的返回上限已经约束了大小。
+
+    2026-09-18 改：原来在结果产生时就压成 stub，导致一个 574 行的文件在 96 KB 的
+    视图里也被切成 4 段。现在只有视图真的越线才修剪（见 `test_large_shell_output_is_pruned_locally_under_pressure`）。
+    两条路径都不调用模型。
+    """
     tool_summaries = []
 
     class FakeLLMWithSummary(FakeLLM):
         def complete_text(self, messages):
-            if "工具结果压缩器" in messages[0]["content"]:
-                tool_summaries.append(messages)
-                return '{"observation": "read one very large file"}'
+            tool_summaries.append(messages)
             return '{"summary": "a text file", "symbols": [], "line_index": []}'
 
+    class BigOutputRunner:
+        def run(self, request, workspace, max_output_bytes):
+            return ShellRunResult(1, "failure line\n" * 500, "", False, False, 5.0)
+
     llm = FakeLLMWithSummary([
-        AssistantTurn(None, [ToolCall("c1", "readfile", {"path": "big.txt"})]),
+        AssistantTurn(None, [ToolCall("c1", "shell", {"program": "pytest", "args": ["tests"]})]),
         AssistantTurn("done", []),
     ])
     workspace = Workspace(sample_git_repo)
@@ -140,11 +146,55 @@ def test_session_run_wires_the_tool_result_summary_provider(sample_git_repo):
         sample_git_repo,
         Settings(api_key="key", model="model"),
         llm_client=llm,
+        shell_approval_ask=lambda _: True,
+        shell_runner=BigOutputRunner(),
         session=session_store.create(),
         session_store=session_store,
     )
 
     assert agent.ask("inspect") == "done"
 
-    assert tool_summaries, "the oversized tool result was never summarized"
-    assert "read one very large file" in json.dumps(llm.messages[-1], ensure_ascii=False)
+    payload = json.loads([m for m in llm.messages[-1] if m.get("role") == "tool"][-1]["content"])
+    assert payload.get("compressed") is not True, "没压力时不该截断"
+    assert payload["exit_code"] == 1
+    assert payload["stdout"].count("failure line") == 500
+    assert tool_summaries == [], "单结果处理不该调用模型"
+
+
+def test_large_shell_output_is_pruned_locally_under_pressure(sample_git_repo):
+    """视图越线后才修剪，而且走本地规则、不调用模型；关键信息（末尾汇总）要留住。"""
+    tool_summaries = []
+
+    class FakeLLMWithSummary(FakeLLM):
+        def complete_text(self, messages):
+            tool_summaries.append(messages)
+            return '{"summary": "a text file", "symbols": [], "line_index": []}'
+
+    class BigOutputRunner:
+        def run(self, request, workspace, max_output_bytes):
+            return ShellRunResult(1, "x" * 30000 + "\n3 failed, 2 passed in 0.5s\n", "", False, False, 5.0)
+
+    llm = FakeLLMWithSummary([
+        AssistantTurn(None, [ToolCall("c1", "shell", {"program": "pytest", "args": ["tests"]})]),
+        AssistantTurn("done", []),
+    ])
+    workspace = Workspace(sample_git_repo)
+    session_store = SessionStore(workspace)
+    agent = CodingAgent.from_settings(
+        sample_git_repo,
+        Settings(api_key="key", model="model"),
+        llm_client=llm,
+        shell_approval_ask=lambda _: True,
+        shell_runner=BigOutputRunner(),
+        session=session_store.create(),
+        session_store=session_store,
+        transcript_budget_chars=20000,
+    )
+
+    assert agent.ask("inspect") == "done"
+
+    payload = json.loads([m for m in llm.messages[-1] if m.get("role") == "tool"][-1]["content"])
+    assert payload["compressed"] is True
+    assert payload["exit_code"] == 1
+    assert "3 failed, 2 passed" in payload["stdout_preview"], "末尾的汇总行必须留住"
+    assert tool_summaries == [], "单结果修剪不该调用模型"

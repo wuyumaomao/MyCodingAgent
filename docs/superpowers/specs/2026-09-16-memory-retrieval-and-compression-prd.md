@@ -66,9 +66,9 @@
 
 ## 6. Transcript Tool Result 压缩
 
-Reducer 仍按 assistant tool call 与 tool result 成组处理，保证配对。每个结果先执行本地压缩并应用单结果配额；较旧结果优先压缩，最新结果优先保留原文。压缩后若仍超出总 transcript 配额，则对超大结果调用 `result_summary_provider`；provider 失败时保留安全元数据，最后才丢弃最旧 group。
+Reducer 仍按 assistant tool call 与 tool result 成组处理，保证配对。每个结果先执行本地压缩并应用单结果配额；较旧结果优先压缩，最新结果优先保留原文。压缩后若仍超出总 transcript 配额，则对最旧的一段调用 `compaction_summarizer` 生成交接摘要；失败时保留本地 stub，最后才丢弃最旧 group。
 
-`result_summary_provider` 默认由同一 `LLMClient` 的无工具请求实现（`LLMToolResultSummaryProvider`），由 `CodingAgent.from_settings()` 装配并传入 `AgentLoop`，生产路径必须实际生效而不是只保留可注入参数。同一 run 内按 tool call id 缓存摘要结果，失败也缓存：历史每轮都会重新压缩，没有缓存就会对同一结果反复发起模型请求。
+单结果压缩**只使用确定性本地规则，不调用模型**。理由是缓存与复现：本地规则是纯函数，同一份历史在任何一轮、任何一次运行都会算出逐字符相同的 stub；而 prompt cache 按精确前缀匹配，LLM 概括每次措辞不同，会让第一条 stub 之后的全部内容失效，也让同一份 session 无法复现出同一个 prompt。主流实现（Codex / Claude Code / DSH）对单个工具结果同样是确定性处理，LLM 只用在段落交接摘要这一层（本节的 `compaction_summarizer`）。
 
 tool result 摘要只存在于本轮发送的 transcript，不写入 `file_summaries` 或 `episodic_notes`。完整工具输出仍保存在 session history/report。
 

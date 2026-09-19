@@ -67,10 +67,47 @@ def test_trace_records_provider_failure(sample_git_repo, tmp_path):
         AgentLoop(llm, make_registry(sample_git_repo), recorder=recorder).run(
             "Explain", Workspace(sample_git_repo)
         )
+
+
+def _loop_with_session(llm, repo, recorder, **kwargs):
+    """指标只在有 session（即启用记忆）时才写进 trace，所以这里必须建一个。"""
+    from coding_agent.session import SessionStore
+
+    session = SessionStore(Workspace(repo)).create()
+    return AgentLoop(llm, make_registry(repo), build_repository_context, recorder=recorder, session=session, **kwargs)
+
+
+def test_trace_records_the_configured_transcript_budget(sample_git_repo, tmp_path):
+    """`--transcript-budget` 必须真的作用到压缩阈值上，否则就没法用它验证压缩。
+
+    这是让压缩行为**可被验证**的开关：默认 120000 的预算下，常见任务根本到不了
+    触发线，压缩路径就只能靠单测覆盖。把预算调低就能在真实 run 里复现压缩。
+    """
+    recorder = RunRecorder.create("Explain", sample_git_repo, tmp_path / "runs")
+    llm = FakeLLM([AssistantTurn("Done", [])])
+    _loop_with_session(llm, sample_git_repo, recorder, transcript_budget_chars=20000).run(
+        "Explain", Workspace(sample_git_repo)
+    )
+
     document = json.loads(recorder.trace_path.read_text(encoding="utf-8"))
-    assert document["status"] == "failed"
-    assert any(event["type"] == "run_failed" for event in document["events"])
-    assert document["events"][-1]["type"] == "run_failed"
+    request = next(event for event in document["events"] if event["type"] == "llm_request")
+
+    assert request["compaction_threshold_chars"] == 16000
+
+
+def test_default_transcript_budget_matches_the_context_default(sample_git_repo, tmp_path):
+    """不传开关时必须用 context 推导出来的默认值，不能悄悄变成另一个数。"""
+    from coding_agent.context import DEFAULT_CONTEXT_WINDOW_TOKENS, derive_transcript_budget
+
+    recorder = RunRecorder.create("Explain", sample_git_repo, tmp_path / "runs")
+    llm = FakeLLM([AssistantTurn("Done", [])])
+    _loop_with_session(llm, sample_git_repo, recorder).run("Explain", Workspace(sample_git_repo))
+
+    document = json.loads(recorder.trace_path.read_text(encoding="utf-8"))
+    request = next(event for event in document["events"] if event["type"] == "llm_request")
+
+    expected = int(derive_transcript_budget(DEFAULT_CONTEXT_WINDOW_TOKENS) * 0.8)
+    assert request["compaction_threshold_chars"] == expected
 
 
 def test_trace_records_invalid_model_response(sample_git_repo, tmp_path):
@@ -170,7 +207,7 @@ def test_trace_records_prompt_length_for_each_model_request(sample_git_repo, tmp
     assert requests[0]["prompt_chars"] > 0
 
 
-def test_trace_records_tool_call_limit(sample_git_repo, tmp_path):
+def test_trace_records_repeated_tool_call(sample_git_repo, tmp_path):
     recorder = RunRecorder.create("read", sample_git_repo, tmp_path / "runs")
     llm = FakeLLM(
         [
@@ -182,7 +219,28 @@ def test_trace_records_tool_call_limit(sample_git_repo, tmp_path):
         llm,
         make_registry(sample_git_repo),
         recorder=recorder,
-        limits=AgentLimits(max_rounds=5, max_calls_per_tool=3),
+        limits=AgentLimits(max_rounds=5),
+    ).run("read", Workspace(sample_git_repo))
+    trace = json.loads(recorder.trace_path.read_text(encoding="utf-8"))
+    repeats = [event for event in trace["events"] if event["type"] == "tool_call_repeat"]
+    assert repeats
+    assert repeats[0]["name"] == "readfile"
+    assert repeats[0]["reason"] == "already_succeeded"
+
+
+def test_trace_records_tool_call_limit(sample_git_repo, tmp_path):
+    recorder = RunRecorder.create("read", sample_git_repo, tmp_path / "runs")
+    llm = FakeLLM(
+        [
+            AssistantTurn(None, [ToolCall(f"c{i}", "listfiles", {"path": f"dir{i}"})])
+            for i in range(4)
+        ] + [AssistantTurn("done", [])]
+    )
+    AgentLoop(
+        llm,
+        make_registry(sample_git_repo),
+        recorder=recorder,
+        limits=AgentLimits(max_rounds=5, max_calls_per_tool=2),
     ).run("read", Workspace(sample_git_repo))
     trace = json.loads(recorder.trace_path.read_text(encoding="utf-8"))
     assert any(event["type"] == "tool_call_limit" for event in trace["events"])

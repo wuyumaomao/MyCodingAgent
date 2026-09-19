@@ -72,9 +72,23 @@ class ShellPolicy:
         program = request.program.strip().lower()
         if program not in self.allowed_programs:
             raise ShellPolicyError("command_not_allowed", "The requested command is not allowed")
-        tokens = [program, *request.args, request.cwd]
+        # 内联代码那一格要跳过元字符检查：它是**数据**不是 shell 语法。runner 用
+        # `shell=False` + argv 列表启动进程，代码里的 `;`/`|`/`>` 由 Python 解释，
+        # 不构成命令分隔。其余 token（含 cwd、额外参数）照旧严查。
+        code_index = _python_inline_code_index(program, request.args)
+        tokens = [
+            value
+            for index, value in enumerate([program, *request.args, request.cwd])
+            if index != (code_index + 1 if code_index is not None else -1)
+        ]
         if any(token in _UNSAFE_TOKENS or any(marker in token for marker in _UNSAFE_TOKENS) for token in tokens):
-            raise ShellPolicyError("unsafe_argument", "Command contains an unsafe shell character")
+            # 拒绝消息必须可行动：模型经常想用 `|` 做正则交替、用 `python -c` 读文件，
+            # 只回一句"含危险字符"它会反复重试同一个思路。
+            raise ShellPolicyError(
+                "unsafe_argument",
+                "Command contains an unsafe shell character (pipes, redirects, separators and newlines are rejected). "
+                "Use the search tool to find text and readfile to read files instead of shell operators.",
+            )
         if any(Path(token).name.lower() in _NESTED_SHELL_NAMES for token in tokens if token):
             raise ShellPolicyError("unsafe_argument", "Nested shells are not allowed")
 
@@ -95,8 +109,18 @@ class ShellPolicy:
 
     def _validate_program_args(self, program: str, args: list[str], workspace: Workspace) -> None:
         if program == "python":
+            # `python -c <code>` 允许，但必然走审批（python 从来不是自动放行的那类）。
+            # 拒掉它并不会让这个能力消失，只会让模型改走"写个临时脚本再删掉"——那既
+            # 污染工作区又多花两三轮，审计上还更差。能力大但需要人看一眼的命令，
+            # 交给审批门而不是黑名单。
+            if _python_inline_code_index(program, args) is not None:
+                return
             if not args or args[0].startswith("-") or not args[0].lower().endswith(".py"):
-                raise ShellPolicyError("unsafe_argument", "python may only execute a workspace .py script")
+                raise ShellPolicyError(
+                    "unsafe_argument",
+                    "python may only execute a workspace .py script, or inline code via `python -c <code>` "
+                    "(which asks for approval). Use readfile to read files or search to find text.",
+                )
             self._workspace_path(workspace, args[0], "script_not_found", must_exist=True, must_be_file=True)
             return
         if program == "pytest":
@@ -127,9 +151,11 @@ class ShellPolicy:
                     self._validate_pytest_args(args[2:], workspace)
                     return
                 if args[1] == "python" and len(args) >= 3:
+                    if _python_inline_code_index("uv", args) is not None:
+                        return
                     script = args[2]
                     if script.startswith("-") or not script.lower().endswith(".py"):
-                        raise ShellPolicyError("subcommand_not_allowed", "uv run python may only execute a workspace Python script")
+                        raise ShellPolicyError("subcommand_not_allowed", "uv run python may only execute a workspace Python script, or inline code via `uv run python -c <code>`")
                     self._workspace_path(workspace, script, "script_not_found", must_exist=True, must_be_file=True)
                     return
                 script = args[1]
@@ -169,6 +195,24 @@ class ShellPolicy:
         if must_be_file and target.exists() and not target.is_file():
             raise ShellPolicyError("script_not_found", "Python script is not a file")
         return target
+
+
+def _python_inline_code_index(program: str, args: list[str]) -> int | None:
+    """Index of the inline program text for ``python -c <code>`` forms.
+
+    认两种写法：`python -c <code>` 和 `uv run python -c <code>`。返回的是 `args` 里
+    代码那一格的**下标**（不是整个 token 列表的下标），调用方据此跳过元字符检查。
+    空代码、缺代码参数都返回 ``None``，让后面的"只允许 .py 脚本"分支去拒绝。
+    """
+    if program == "python":
+        offset = 0
+    elif program == "uv" and len(args) >= 2 and args[0] == "run" and args[1] == "python":
+        offset = 2
+    else:
+        return None
+    if len(args) > offset + 1 and args[offset] == "-c" and args[offset + 1].strip():
+        return offset + 1
+    return None
 
 
 def _looks_like_path(value: str) -> bool:

@@ -264,7 +264,9 @@ def test_cli_shell_command_runs_after_approval(monkeypatch, sample_git_repo, tmp
     assert main(["check", "--repo", str(sample_git_repo)]) == 0
     assert capsys.readouterr().out.strip() == "checked"
     assert len(calls) == 1
-    assert "exit_code" in client.messages[-1][-1]["content"]
+    # 记忆快照现在是 prompt 的最后一条消息；工具结果在其之前
+    tool_messages = [m for m in client.messages[-1] if m.get("role") == "tool"]
+    assert tool_messages and "exit_code" in tool_messages[-1]["content"]
 
 
 def test_cli_shell_command_is_rejected_without_tty(monkeypatch, sample_git_repo, tmp_path, capsys):
@@ -279,7 +281,8 @@ def test_cli_shell_command_is_rejected_without_tty(monkeypatch, sample_git_repo,
     monkeypatch.setattr("coding_agent.cli.LLMClient", lambda **kwargs: client)
     assert main(["check", "--repo", str(sample_git_repo)]) == 0
     assert capsys.readouterr().out.strip() == "approval needed"
-    assert "approval_required" in client.messages[-1][-1]["content"]
+    tool_messages = [m for m in client.messages[-1] if m.get("role") == "tool"]
+    assert tool_messages and "approval_required" in tool_messages[-1]["content"]
 
 
 def test_cli_write_tool_requires_approval_and_can_write(monkeypatch, sample_git_repo, tmp_path):

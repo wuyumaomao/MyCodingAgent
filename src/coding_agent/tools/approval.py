@@ -42,6 +42,8 @@ class WritePreview:
     old_text: str | None = None
     new_text: str | None = None
     existed: bool = False
+    # 写文件会顺带建出缺失的父目录，这是审批时必须让用户看见的副作用。
+    creates_directories: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)

@@ -73,12 +73,21 @@ class PatchFileTool:
         except UnicodeDecodeError:
             return _error("decode_error", "File is not valid UTF-8 text")
 
-        matches = content.count(old_text)
+        # 匹配要用**和 readfile 看到的同一种表示**。readfile 走文本模式（通用换行，
+        # CRLF 显示成 LF），而这里读的是原始字节，两者不一致时模型照着 readfile 写的
+        # `old_text="TODO\n"` 会在 CRLF 文件上永远匹配不上（真实 run 里模型试了两次
+        # 才摸到"只传单行不带换行"这个 workaround）。
+        line_ending = "\r\n" if "\r\n" in content else "\n"
+        normalized = content.replace("\r\n", "\n")
+        matches = normalized.count(old_text)
         if matches == 0:
             return _error("text_not_found", "The old text was not found")
         if matches != 1:
             return _error("text_not_unique", "The old text must match exactly once")
-        updated = content.replace(old_text, new_text, 1)
+        updated = normalized.replace(old_text, new_text, 1)
+        # 写回时恢复文件原来的换行风格，不要让 patch 顺手把 LF 改成 CRLF（或反过来）。
+        if line_ending == "\r\n":
+            updated = updated.replace("\n", "\r\n")
         bytes_written = len(updated.encode("utf-8"))
         if bytes_written > self.max_bytes:
             return _error("file_too_large", "Patched file exceeds the write limit")
