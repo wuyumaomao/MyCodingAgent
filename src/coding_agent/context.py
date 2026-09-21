@@ -235,6 +235,22 @@ class ConversationContext:
             }
         )
 
+    def invalidate_compaction(self) -> None:
+        """Drop the current handoff view after repository state changes.
+
+        ``history`` is intentionally preserved. The next prompt rebuilds from
+        the complete history and the updated memory instead of reusing facts
+        summarized before a write or patch.
+        """
+        if not self._compaction["summary"] and not self._compaction["ledger"] and self._compaction["covered"] == 0:
+            return
+        self._compaction = {"covered": 0, "summary": "", "ledger": {}}
+        if self.memory is not None:
+            self.memory.data["compaction"] = {"covered": 0, "summary": "", "ledger": {}}
+        self._compaction_attempted = False
+        self._compaction_retry_chars = 0
+        self.compaction_serial += 1
+
     def messages(self, query: str | None = None) -> list[dict[str, Any]]:
         if self.memory is None:
             return copy.deepcopy(self.system_messages + self.history)

@@ -232,6 +232,21 @@ class MemoryManager:
         working["latest_tool_error"] = None
         working.setdefault("recent_modified_files", [])
 
+    def invalidate_path(self, path: str) -> None:
+        """Invalidate knowledge derived from a file after a successful write.
+
+        A handoff summary is a snapshot of repository facts, so keeping it after
+        a write can make the model trust conclusions about the old file. Clear
+        the whole compaction snapshot conservatively; the raw history remains
+        available and can be compacted again using the new file state.
+        """
+        self.data.setdefault("file_summaries", {}).pop(path, None)
+        self.data["episodic_notes"] = [
+            note for note in self.data.setdefault("episodic_notes", [])
+            if note.get("path") != path
+        ]
+        self.data["compaction"] = {"covered": 0, "summary": "", "ledger": {}}
+
     def observe_tool_result(self, call: ToolCall, result: dict[str, Any], *, run_id: str, round_number: int, raw_content: str | None = None) -> None:
         working = self.data.setdefault("working_memory", {})
         path = result.get("path") or call.arguments.get("path")
@@ -286,8 +301,7 @@ class MemoryManager:
         if result.get("ok") is True and call.name in {"write_file", "patch_file"} and isinstance(path, str):
             recent_modified = [item for item in working.setdefault("recent_modified_files", []) if item != path]
             working["recent_modified_files"] = [path, *recent_modified][:10]
-            self.data.setdefault("file_summaries", {}).pop(path, None)
-            self.data["episodic_notes"] = [n for n in self.data.setdefault("episodic_notes", []) if n.get("path") != path]
+            self.invalidate_path(path)
         if result.get("ok") is False:
             error = result.get("error") or {}
             error_type = str(error.get("type", "tool_error"))

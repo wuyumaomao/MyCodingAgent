@@ -27,12 +27,18 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--model")
     parser.add_argument("--base-url")
     parser.add_argument("--timeout", type=float)
+    parser.add_argument(
+        "--context-window-tokens",
+        type=int,
+        default=None,
+        help="Override the model context window used for transcript budgeting",
+    )
     parser.add_argument("--max-tool-calls", type=int, default=30, help="Safety valve on calls per tool; repeat detection is the primary limit")
     parser.add_argument(
         "--transcript-budget",
         type=int,
         default=None,
-        help="Override the history-view character budget (default 120000); lower it to force compaction for testing",
+        help="Override the history-view character budget; lower it to force compaction for testing",
     )
     parser.add_argument("--shell-timeout", type=float, default=60.0)
     parser.add_argument("--session")

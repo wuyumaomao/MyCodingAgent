@@ -64,6 +64,25 @@ def test_settings_parse_timeout(monkeypatch):
     assert settings.timeout == 12.5
 
 
+def test_settings_parse_context_window_tokens(monkeypatch):
+    monkeypatch.setenv("CODING_AGENT_API_KEY", "env-key")
+    monkeypatch.setenv("CODING_AGENT_MODEL", "env-model")
+    monkeypatch.setenv("CODING_AGENT_CONTEXT_WINDOW_TOKENS", "128000")
+    settings = Settings.from_args_and_env(
+        Namespace(api_key=None, model=None, base_url=None, timeout=None)
+    )
+    assert settings.context_window_tokens == 128000
+
+
+def test_settings_reject_non_positive_context_window_tokens(monkeypatch):
+    monkeypatch.setenv("CODING_AGENT_API_KEY", "env-key")
+    monkeypatch.setenv("CODING_AGENT_MODEL", "env-model")
+    with __import__("pytest").raises(ValueError, match="positive"):
+        Settings.from_args_and_env(
+            Namespace(api_key=None, model=None, base_url=None, timeout=None, context_window_tokens=0)
+        )
+
+
 def test_settings_default_model_timeout_is_600_seconds(monkeypatch):
     monkeypatch.setenv("CODING_AGENT_API_KEY", "env-key")
     monkeypatch.setenv("CODING_AGENT_MODEL", "env-model")

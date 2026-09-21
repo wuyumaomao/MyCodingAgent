@@ -49,6 +49,16 @@ def test_from_settings_builds_reusable_agent_without_trace(monkeypatch, sample_g
     }
 
 
+def test_from_settings_passes_context_window_to_agent_loop(sample_git_repo):
+    agent = CodingAgent.from_settings(
+        sample_git_repo,
+        Settings(api_key="key", model="model", context_window_tokens=128000),
+        llm_client=FakeLLM([AssistantTurn("done", [])]),
+    )
+
+    assert agent.loop.context_window_tokens == 128000
+
+
 def test_reused_agent_records_approval_events_in_current_run(monkeypatch, sample_git_repo, tmp_path):
     monkeypatch.setattr(
         "coding_agent.coding_agent.LLMClient",

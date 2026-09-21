@@ -73,7 +73,7 @@ tool_result  readfile  ok=True  3.76ms
 **`request` 行**
 - `prompt_chars`：本轮发送给模型的 `messages` 序列化字符数（**不含**工具定义）
 - `transcript_chars`：**视图本身**（交接摘要 + 历史）的字符数——段落压缩阈值比较的就是这个数。它比 `prompt_chars` 小的部分就是静态 system 消息加上本轮的记忆快照
-- `compaction_threshold_chars`：本轮的压缩触发线（默认 `transcript_budget_chars × 0.8` = 38400）。拿 `transcript_chars` 和它比，才知道"该压而没压"是否真的发生了
+- `compaction_threshold_chars`：本轮的压缩触发线（默认是实际 `transcript_budget_chars × 0.8`；预算由模型 context window 推导，也可由 CLI 覆盖）。拿 `transcript_chars` 和它比，才知道"该压而没压"是否真的发生了
 - `stable_prefix`：本轮 prompt 与**上一轮** prompt 的公共字符前缀长度，括号内是占本轮 prompt 的比例。第 1 轮恒为 0
 - `covered`：有多少条历史已被压缩摘要覆盖（有压缩过才显示）
 - `dropped_groups`：因超硬预算被丢弃的旧组数量（仅在发生丢弃时显示）
@@ -103,7 +103,7 @@ tool_result  readfile  ok=True  3.76ms
 |---|---|---|---|
 | `prompt_chars` | `request` 行 | 随轮次平缓增长，压缩后回落一次 | 每轮都回落 = 压缩抖动 |
 | `transcript_chars` | `request` 行 | 长期低于 `compaction_threshold_chars`，越线后回落一次 | 持续高于阈值却不回落 = 该压没压，prompt 会一直涨 |
-| `compaction_threshold_chars` | `request` 行 | 恒定（默认 38400） | 与预算配置不一致 = 配置没生效 |
+| `compaction_threshold_chars` | `request` 行 | 同一 run 内恒定 | 与预算配置不一致 = 配置没生效 |
 | `stable_prefix` | `request` 行 | 第 2 轮起接近上一轮 prompt 的 85%+ | 长期偏低 = prompt 前缀每轮都在变，缓存失效 |
 | `covered` | `request` 行 | 偶尔跳增一次，然后长期不变 | 每轮 +N 且 prompt 不增长 = 把最新工作压进了摘要 |
 | `dropped_groups` | `request` 行 | 一直是 0 | 大于 0 表示硬预算兜底被触发，有历史被丢弃 |
@@ -134,10 +134,14 @@ tool_result  readfile  ok=True  3.76ms
 ### 5.3 压缩是否按预期工作
 
 - 阈值以下：相邻两轮的 prompt 应是**纯追加**关系，`stable_prefix` 高
-- 跨过阈值（`transcript_chars` > `compaction_threshold_chars`，默认 38400）：`covered` 跳增一次，`transcript_chars` 回落，**然后恢复纯追加**
-- `covered` 持续增长 = 压缩抖动，检查 `compaction_target_chars` 加交接摘要上限是否低于阈值（当前 `12000 + 1500 = 13500 < 38400`）
+- 跨过阈值（`transcript_chars` > `compaction_threshold_chars`）：`covered` 跳增一次，`transcript_chars` 回落，**然后恢复纯追加**
+- `covered` 持续增长 = 压缩抖动，检查 `compaction_target_chars` 加交接摘要和台账上限是否低于当前触发线
 - `dropped_groups` 大于 0 = 摘要器不可用或反复失败，触发了硬预算兜底
 - 单结果压缩是否生效：`context_compressed kind=tool_result` 的 `before->after`。若某个 `readfile` 反复出现 `before` 很大而模型下一轮又读同一个文件的相邻区间，先看它的 stub 是不是只有元数据（见 5.2）
+
+### 5.4 Session checkpoint 恢复
+
+断点恢复的细节落在目标仓库 `.coding-agent/sessions/<session-id>.json`，而不是 run report。检查 `checkpoints.active` 是否只在工具执行窗口存在；正常完成后它应归档到 `recent` 并清空 active。若下一次 run 发生恢复，查看 `resume_state.status`：`reconciled` 表示文件证据足以确认写入已完成，`resume_required` 表示存在无法确认的调用，`runtime_mismatch` 表示运行模型或上下文身份发生变化。恢复不会自动重跑高风险工具；应在 history 中看到对应的 `execution_interrupted` tool result，并由模型决定下一步。
 
 ## 6. 常见现象与对应原因
 

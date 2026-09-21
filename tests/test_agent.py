@@ -7,6 +7,7 @@ from coding_agent.context import build_repository_context
 from coding_agent.llm import InvalidToolArguments
 from coding_agent.models import AssistantTurn, ToolCall
 from coding_agent.repository import Workspace
+from coding_agent.session import SessionStore
 from coding_agent.tools.listfiles import ListFilesTool
 from coding_agent.tools.readfile import ReadFileTool
 from coding_agent.tools.approval import WriteApprovalGate
@@ -329,3 +330,118 @@ def test_loop_returns_unknown_tool_result(sample_git_repo):
 
     assert answer == "That tool is unavailable."
     assert "unknown_tool" in llm.messages[-1][-1]["content"]
+
+
+def test_checkpoint_is_saved_before_tool_execution_crash(sample_git_repo, monkeypatch):
+    workspace = Workspace(sample_git_repo)
+    store = SessionStore(workspace)
+    session = store.create()
+    llm = FakeLLM([AssistantTurn(None, [ToolCall("c1", "readfile", {"path": "README.md"})])])
+
+    def crash(_executor, _call):
+        raise RuntimeError("simulated process failure")
+
+    monkeypatch.setattr("coding_agent.agent.ToolExecutor.execute", crash)
+    loop = AgentLoop(llm, make_registry(sample_git_repo), session=session, session_store=store)
+
+    with __import__("pytest").raises(RuntimeError, match="simulated"):
+        loop.run("read README", workspace)
+
+    loaded = store.load(session.session_id)
+    active = loaded.checkpoints["active"]
+    assert active["status"] == "running"
+    assert active["calls"][0]["id"] == "c1"
+    assert loaded.history[-1]["role"] == "assistant"
+
+
+def test_run_reconciles_interrupted_write_before_next_model_request(sample_git_repo):
+    workspace = Workspace(sample_git_repo)
+    store = SessionStore(workspace)
+    session = store.create()
+    (sample_git_repo / "result.txt").write_text("done\n", encoding="utf-8")
+    call = ToolCall("w1", "write_file", {"path": "result.txt", "content": "done\n"})
+    session.history.extend([
+        {"role": "user", "content": "write result"},
+        {"role": "assistant", "content": None, "tool_calls": [{"id": "w1", "type": "function", "function": {"name": "write_file", "arguments": json.dumps(call.arguments)}}]},
+    ])
+    session.checkpoints["active"] = {
+        "id": "cp-1",
+        "run_id": "old-run",
+        "round": 1,
+        "status": "running",
+        "calls": [{"id": "w1", "name": "write_file", "arguments": call.arguments, "status": "running", "workspace_before": {"files": {"result.txt": {"exists": False}}}}],
+    }
+    store.save(session)
+
+    llm = FakeLLM([AssistantTurn("resumed", [])])
+    loop = AgentLoop(llm, make_write_registry(sample_git_repo, WriteApprovalGate(ask=lambda _: True)), session=session, session_store=store)
+
+    assert loop.run("continue", workspace) == "resumed"
+    assert any(
+        message.get("role") == "tool" and "reconciled" in message.get("content", "")
+        for message in llm.messages[0]
+    )
+    assert store.load(session.session_id).checkpoints["active"] is None
+
+
+def test_recovery_refuses_to_resume_after_runtime_identity_change(sample_git_repo):
+    workspace = Workspace(sample_git_repo)
+    store = SessionStore(workspace)
+    session = store.create()
+    session.runtime_identity["model"] = "old-model"
+    session.history.extend([
+        {"role": "user", "content": "read README"},
+        {"role": "assistant", "content": None, "tool_calls": [{
+            "id": "r1", "type": "function",
+            "function": {"name": "readfile", "arguments": json.dumps({"path": "README.md"})},
+        }]},
+    ])
+    session.checkpoints["active"] = {
+        "id": "cp-runtime", "run_id": "old-run", "round": 1, "status": "running",
+        "calls": [{"id": "r1", "name": "readfile", "arguments": {"path": "README.md"}, "status": "running"}],
+    }
+    store.save(session)
+
+    llm = FakeLLM([AssistantTurn("continued", [])])
+    loop = AgentLoop(
+        llm,
+        make_registry(sample_git_repo),
+        session=session,
+        session_store=store,
+        runtime_identity={"model": "new-model"},
+    )
+
+    assert loop.run("continue", workspace) == "continued"
+    loaded = store.load(session.session_id)
+    assert loaded.resume_state["status"] == "runtime_mismatch"
+    assert loaded.resume_state["runtime_mismatches"] == ["model"]
+    assert "runtime identity changed" in llm.messages[0][-1]["content"]
+
+
+def test_recovery_does_not_duplicate_tool_result_already_in_history(sample_git_repo):
+    workspace = Workspace(sample_git_repo)
+    store = SessionStore(workspace)
+    session = store.create()
+    arguments = {"path": "README.md"}
+    existing_result = {"role": "tool", "tool_call_id": "r2", "content": json.dumps({"ok": True, "path": "README.md"})}
+    session.history.extend([
+        {"role": "user", "content": "read README"},
+        {"role": "assistant", "content": None, "tool_calls": [{
+            "id": "r2", "type": "function",
+            "function": {"name": "readfile", "arguments": json.dumps(arguments)},
+        }]},
+        existing_result,
+    ])
+    session.checkpoints["active"] = {
+        "id": "cp-duplicate", "run_id": "old-run", "round": 1, "status": "running",
+        "calls": [{"id": "r2", "name": "readfile", "arguments": arguments, "status": "running"}],
+    }
+    store.save(session)
+
+    llm = FakeLLM([AssistantTurn("continued", [])])
+    loop = AgentLoop(llm, make_registry(sample_git_repo), session=session, session_store=store)
+
+    assert loop.run("continue", workspace) == "continued"
+    assert [m for m in llm.messages[0] if m.get("role") == "tool" and m.get("tool_call_id") == "r2"] == [
+        existing_result
+    ]

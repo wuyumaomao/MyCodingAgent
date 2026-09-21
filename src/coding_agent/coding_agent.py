@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+import platform
+import sys
 from typing import Any
 
 from .agent import AgentLimits, AgentLoop
@@ -23,7 +25,7 @@ from .tools.shell_policy import ShellPolicy
 from .tools.shell_runner import WindowsProcessRunner
 from .tools.writefile import WriteFileTool
 from .trace import RunRecorder
-from .session import SessionState, SessionStore
+from .session import SessionState, SessionStore, update_runtime_identity
 
 
 class CodingAgent:
@@ -92,6 +94,15 @@ class CodingAgent:
             )
         else:
             client = llm_client
+        if session is not None:
+            # Store only facts needed for safe recovery; never persist API credentials.
+            update_runtime_identity(
+                session,
+                model=getattr(settings, "model", None),
+                context_window_tokens=settings.context_window_tokens,
+            )
+            if session_store is not None:
+                session_store.save(session)
         loop = AgentLoop(
             client,
             registry,
@@ -102,6 +113,14 @@ class CodingAgent:
             summary_provider=(LLMFileSummaryProvider(client.complete_text) if hasattr(client, "complete_text") else None),
             compaction_summarizer=(LLMSpanSummaryProvider(client.complete_text) if hasattr(client, "complete_text") else None),
             transcript_budget_chars=transcript_budget_chars,
+            context_window_tokens=settings.context_window_tokens,
+            runtime_identity={
+                "repo_root": str(workspace.root),
+                "platform": sys.platform,
+                "python": platform.python_version(),
+                "model": settings.model,
+                **({"context_window_tokens": settings.context_window_tokens} if settings.context_window_tokens is not None else {}),
+            },
         )
         return cls(loop, workspace, registry)
 
@@ -113,5 +132,11 @@ class CodingAgent:
         if session is not None and session is not self.loop.session:
             self.loop.session = session
             self.loop.session_store = SessionStore(self.workspace)
+            update_runtime_identity(
+                session,
+                model=getattr(self.loop.llm_client, "model", None),
+                context_window_tokens=self.loop.context_window_tokens,
+            )
+            self.loop.session_store.save(session)
         sink = RecorderEventSink(recorder) if recorder is not None else NullEventSink()
         return self.loop.run(query, self.workspace, event_sink=sink)

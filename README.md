@@ -138,7 +138,7 @@ source_files:
 → 触发线 547,200，压缩目标 171,000，地板 175,200，余量 372,000
 ```
 
-占比取 0.20 是**保守**值（DSH 用 0.8）：留出输出空间，也避免长上下文里"中段信息被忽略"的退化。实测铺 10 个 40K 字符的工具结果（视图 413,014 字符）**全程 0 次压缩**，旧阈值下这会压 4 次左右。换模型时改 `DEFAULT_CONTEXT_WINDOW_TOKENS`（或传 `context_window_tokens`），`--transcript-budget` 仍然可以手动覆盖（验证压缩行为时要用）。
+占比取 0.20 是**保守**值（DSH 用 0.8）：留出输出空间，也避免长上下文里"中段信息被忽略"的退化。生产链会把 `Settings.context_window_tokens` 传入 `ConversationContext`；可以用环境变量 `CODING_AGENT_CONTEXT_WINDOW_TOKENS` 或 CLI 参数 `--context-window-tokens` 覆盖默认窗口。`--transcript-budget` 仍然可以手动覆盖（验证压缩行为时要用）。
 
 `next_action_hint` 里的窗口也是踩出来的：最早写死"从缺口第一行起读 100 行"（`first + 99`）。在平均行长 33 字符的文件上刚好，换个行长 165 字符的文件就会立刻引发第二次截断；而只按 2/3 配额算窗口又会白扔 1/3 预算。现在窗口按**这份内容自己的平均行长**推：
 
@@ -148,7 +148,7 @@ source_files:
 
 同一份 575 行、平均 33 字符/行的文件，补齐 429 行的缺口：写死 100 行要 5 次续读（连整读 6 次），按行长算出 143 行只要 3 次（连整读 4 次），而且窗口范围内不会二次截断。**注意这个保证是"对着提示给的那一段"成立的**：把 143 行套用到另一段（平均行长 40.4）会超出 55 字符，那一次读取会被截断并产生一条新的提示——这是可接受的，因为新提示同样按它自己那一段算。还有一个粗糙处：无损读取不产生 stub，也就没有新提示，模型得自己选下一段区间。
 
-这个阈值也不能设小。它决定的是**模型能不能在一次调用里看完一个源文件**：设成 2000 字符时，一个 574 行的文件要切成十几段才读得完，而每次 `readfile` 都占一轮、都要重发一遍不断变长的 transcript——既烧轮数又烧 token。6000 字符够装下一个完整函数或一段主流程，剩下的靠省略行号指路。两个阈值还必须联动：`compaction_threshold_chars` 是 `transcript_budget_chars` 的 0.8 倍，默认 38400，而压缩后的地板是 `0.25 × 48000 + 1500 = 13500`，留出约 24900 字符的余量——余量必须为正，否则压缩刚触发就再次触发，形成抖动（这个 bug 出现过：当时地板 10000 > 阈值 9600）。
+这个阈值也不能设小。它决定的是**模型能不能在一次调用里看完一个源文件**：设成 2000 字符时，一个 574 行的文件要切成十几段才读得完，而每次 `readfile` 都占一轮、都要重发一遍不断变长的 transcript——既烧轮数又烧 token。6000 字符够装下一个完整函数或一段主流程，剩下的靠省略行号指路。两个阈值还必须联动：`compaction_threshold_chars` 是 `transcript_budget_chars` 的 0.8 倍，压缩目标和 handoff 上限必须共同低于触发线；测试用的极小预算如果无法满足这个不变量，应直接拒绝，而不是进入压缩抖动。
 
 **代价要明确**：`session.history` 里保存的是压缩后的 stub，完整工具输出保存在当次 run 的 `report.json` 里（`tool_result` 事件在压缩之前就写出了完整结果）。
 
@@ -184,6 +184,8 @@ coding-agent "继续检查测试" --repo F:\AgentLabs\httpstat --session <sessio
 
 session 状态保存在目标仓库的 `.coding-agent/sessions/<session-id>.json`，其中包含完整 history、working memory、file summaries 和 episodic notes。快照由三段组成：`[Memory]` 是每轮无条件发送的状态板（任务、约束、最近读过的文件、最近改动的文件、最新工具错误，各字段的更新时机见下）；`[Relevant Memory]` 按关键词最多召回 3 条历史 note；`[Relevant File Summaries]` 按相关度最多召回 5 条文件摘要（用 query 关键词对 `路径 + summary + symbols` 打分，改过的文件 +3、刚读过的 +1）。三段都在 prompt 尾部且很少变化，所以缓存前缀保持稳定。完整工具结果仍保留在每个 run 的 `report.json` 中。
 
+session 还保存一个有界的 `checkpoints` 集合。工具批次开始时写入 `active`，每个工具在执行前标为 `running`，结果落入 history 后标为 `completed` 或 `completed_error`；批次结束后只保留少量 `recent` 元数据。若进程在工具执行窗口崩溃，下一次使用同一 `--session` 会比较工作区快照和 `runtime_identity`，将可确认的写入标为已恢复，无法确认的调用以 `execution_interrupted` 结果交给模型判断，绝不会自动重跑 `write_file`、`patch_file` 或 `shell`。`resume_state` 保存这次检查结论；trace/report 仍是完整审计来源。
+
 `[Memory]` 里两个容易混淆的字段：`recent_read_files` 只在 `readfile` 成功时更新（`listfiles`/`find_files` 带回来的目录不算，否则这一栏会变成 `a.py, kb, tests, .`），`recent_modified_files` 只在 `write_file`/`patch_file` 成功后更新。两个都要渲染：历史里的 `readfile` 结果会被段落压缩吃掉，`[Memory]` 不会，所以它是压缩之后模型唯一还能知道"这个文件我已经读过"的地方。
 
 每次 CLI 提问都会创建一个独立的 run。运行结束后，CLI 会在标准错误中显示 run ID 和 trace 路径：
@@ -217,6 +219,4 @@ uv run python scripts/inspect_run.py --prompts
 
 ## 后续计划
 
-1. 增加 Shell/测试工具及审批机制
-2. 增加运行状态持久化和断点恢复
-3. 增加本地 HTTP 服务和 IDE 客户端
+1. 增加本地 HTTP 服务和 IDE 客户端

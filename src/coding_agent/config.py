@@ -22,6 +22,7 @@ class Settings:
     model: str
     base_url: str = DEFAULT_BASE_URL
     timeout: float = DEFAULT_TIMEOUT
+    context_window_tokens: int | None = None
 
     @classmethod
     def from_args_and_env(cls, args: Namespace) -> "Settings":
@@ -44,8 +45,29 @@ class Settings:
                 raise ConfigError("Timeout must be a positive number") from exc
             if timeout <= 0:
                 raise ConfigError("Timeout must be a positive number")
+        arg_context_window = getattr(args, "context_window_tokens", None)
+        context_value = (
+            arg_context_window
+            if arg_context_window is not None
+            else os.getenv("CODING_AGENT_CONTEXT_WINDOW_TOKENS")
+        )
+        if context_value is None or context_value == "":
+            context_window_tokens = None
+        else:
+            try:
+                context_window_tokens = int(context_value)
+            except (TypeError, ValueError) as exc:
+                raise ConfigError("Context window tokens must be a positive integer") from exc
+            if context_window_tokens <= 0:
+                raise ConfigError("Context window tokens must be a positive integer")
         if not api_key:
             raise ConfigError("API key is required (set CODING_AGENT_API_KEY)")
         if not model:
             raise ConfigError("Model is required (set CODING_AGENT_MODEL)")
-        return cls(api_key=api_key, model=model, base_url=base_url, timeout=timeout)
+        return cls(
+            api_key=api_key,
+            model=model,
+            base_url=base_url,
+            timeout=timeout,
+            context_window_tokens=context_window_tokens,
+        )

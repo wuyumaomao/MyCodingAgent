@@ -15,7 +15,17 @@ from .trace import RunRecorder
 from .events import NullEventSink, RecorderEventSink
 from .tool_executor import ToolExecutor
 from .memory import MemoryManager
-from .session import SessionState, SessionStore
+from .session import (
+    SessionState,
+    SessionStore,
+    begin_checkpoint,
+    finish_checkpoint,
+    mark_checkpoint_result,
+    mark_checkpoint_running,
+    reconcile_checkpoint,
+    runtime_identity_mismatches,
+    _now,
+)
 
 
 class AgentError(RuntimeError):
@@ -54,10 +64,14 @@ class AgentLoop:
         summary_provider: Callable[[str, str, dict[str, Any]], dict[str, Any]] | None = None,
         compaction_summarizer: Callable[[list[dict[str, Any]]], str] | None = None,
         transcript_budget_chars: int | None = None,
+        context_window_tokens: int | None = None,
+        runtime_identity: dict[str, Any] | None = None,
     ) -> None:
         if limits is not None and max_rounds is not None:
             raise ValueError("Pass limits or max_rounds, not both")
         self.transcript_budget_chars = transcript_budget_chars
+        self.context_window_tokens = context_window_tokens
+        self.runtime_identity = dict(runtime_identity or {})
         self.limits = limits or AgentLimits(max_rounds=max_rounds or 20)
         self.llm_client = llm_client
         self.model_gateway = ModelGateway(llm_client, max_retries=self.limits.max_llm_retries)
@@ -80,13 +94,16 @@ class AgentLoop:
             memory=memory,
             compaction_summarizer=self.compaction_summarizer,
             event_sink=sink,
-            **({"transcript_budget_chars": self.transcript_budget_chars} if self.transcript_budget_chars else {}),
+            **({"transcript_budget_chars": self.transcript_budget_chars} if self.transcript_budget_chars is not None else {}),
+            **({"context_window_tokens": self.context_window_tokens} if self.context_window_tokens is not None else {}),
         )
         if self.session is not None:
             context.history = self.session.history
             memory.begin_run(query)
+            self._resume_active_checkpoint(context, memory, workspace)
         context.add_user_request(query)
         tool_executor = ToolExecutor(self.registry, self.limits, sink)
+        run_id = self.recorder.run_id if self.recorder is not None else f"session-{int(time.time() * 1000)}"
         seen_compaction = 0
         for round_number in range(1, self.max_rounds + 1):
             messages = context.messages(query if memory is not None else None)#获取要发送的信息
@@ -160,8 +177,15 @@ class AgentLoop:
                         self.session_store.save(self.session)
                 sink.complete(answer)
                 return answer
+            if self.session is not None and self.session_store is not None:
+                begin_checkpoint(self.session, run_id, round_number, turn.tool_calls, workspace)
             context.add_assistant_turn(turn)#工具调用来了，追加 assistant 消息
+            if self.session_store is not None and self.session is not None:
+                self.session_store.save(self.session)
             for call in turn.tool_calls:#把工具调用记录写到trace
+                if self.session is not None and self.session_store is not None:
+                    mark_checkpoint_running(self.session, call.id, workspace, call.arguments)
+                    self.session_store.save(self.session)
                 execution = tool_executor.execute(call)
                 if memory is not None:
                     raw_content = None
@@ -174,14 +198,91 @@ class AgentLoop:
                             except (OSError, UnicodeError):
                                 raw_content = None
                     memory.observe_tool_result(call, execution.result, run_id=self.session.session_id, round_number=round_number, raw_content=raw_content)
+                    if execution.result.get("ok") is True and call.name in {"write_file", "patch_file"}:
+                        context.invalidate_compaction()
                 context.add_tool_result(call, execution.result)#追加 tool 结果消息
+                if self.session is not None and self.session_store is not None:
+                    mark_checkpoint_result(self.session, call.id, execution.result)
                 if self.session_store is not None:
                     self.session_store.save(self.session)
+            if self.session is not None and self.session_store is not None:
+                finish_checkpoint(self.session)
+                self.session_store.save(self.session)
         if self.session_store is not None and self.session is not None:
             self.session_store.save(self.session)
         answer = f"Reached the round limit of {self.max_rounds} before the task was complete."
         sink.fail("round_limit", "Reached the round limit")
         return answer
+
+    def _resume_active_checkpoint(self, context: ConversationContext, memory: MemoryManager, workspace: Workspace) -> None:
+        if self.session is None or self.session_store is None:
+            return
+        active = self.session.checkpoints.get("active")
+        if not isinstance(active, dict):
+            return
+        mismatches = runtime_identity_mismatches(self.session, self.runtime_identity)
+        if mismatches:
+            unresolved = []
+            tool_results = []
+            for item in active.get("calls") or []:
+                if not isinstance(item, dict):
+                    continue
+                call_id = str(item.get("id", ""))
+                name = str(item.get("name", ""))
+                arguments = dict(item.get("arguments") or {})
+                unresolved.append({"id": call_id, "tool": name, "state": "runtime_mismatch"})
+                tool_results.append({
+                    "id": call_id,
+                    "name": name,
+                    "arguments": arguments,
+                    "result": {
+                        "ok": False,
+                        "error": {
+                            "type": "execution_interrupted",
+                            "message": "Recovery was not attempted because runtime identity changed: " + ", ".join(mismatches),
+                        },
+                    },
+                })
+            reconciliation = {
+                "tool_results": tool_results,
+                "resume_state": {
+                    "status": "runtime_mismatch",
+                    "checkpoint_id": active.get("id"),
+                    "checked_at": _now(),
+                    "workspace_changed": False,
+                    "unresolved_calls": unresolved,
+                    "runtime_mismatches": mismatches,
+                },
+            }
+        else:
+            reconciliation = reconcile_checkpoint(workspace, active)
+        known_ids = {
+            str(call.get("id"))
+            for message in context.history
+            if message.get("role") == "assistant"
+            for call in message.get("tool_calls", [])
+        }
+        known_result_ids = {
+            str(message.get("tool_call_id"))
+            for message in context.history
+            if message.get("role") == "tool" and message.get("tool_call_id") is not None
+        }
+        calls = []
+        for item in active.get("calls") or []:
+            if isinstance(item, dict) and str(item.get("id")) not in known_ids:
+                calls.append(ToolCall(str(item.get("id")), str(item.get("name")), dict(item.get("arguments") or {})))
+        if calls:
+            context.add_assistant_turn(AssistantTurn(None, calls))
+        for item in reconciliation["tool_results"]:
+            call = ToolCall(str(item["id"]), str(item["name"]), dict(item.get("arguments") or {}))
+            if call.id in known_result_ids:
+                continue
+            context.add_tool_result(call, item["result"])
+            memory.observe_tool_result(call, item["result"], run_id=self.session.session_id, round_number=int(active.get("round", 0) or 0))
+        self.session.resume_state = reconciliation["resume_state"]
+        finish_checkpoint(self.session)
+        self.session.resume_state = reconciliation["resume_state"]
+        self.session_store.save(self.session)
 
 def _duration_ms(started: float) -> float:
     return round((time.perf_counter() - started) * 1000, 3)

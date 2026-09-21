@@ -103,8 +103,16 @@ def test_recent_read_files_is_capped_and_moves_the_latest_to_the_front():
 def test_patch_invalidates_summary():
     memory = make_memory()
     memory.data["file_summaries"]["a.py"] = {"freshness": "x"}
+    memory.data["compaction"] = {
+        "covered": 12,
+        "summary": "[Context Handoff]\nold a.py conclusion",
+        "ledger": {"read": {"a.py": {"whole": True, "lines": 10, "ranges": []}}},
+    }
     memory.observe_tool_result(ToolCall("1", "patch_file", {"path": "a.py"}), {"ok": True, "path": "a.py"}, run_id="r", round_number=1)
     assert "a.py" not in memory.data["file_summaries"]
+    assert memory.data["compaction"]["covered"] == 0
+    assert memory.data["compaction"]["summary"] == ""
+    assert memory.data["compaction"]["ledger"] == {}
 
 
 def test_relevant_memory_is_limited_to_three():

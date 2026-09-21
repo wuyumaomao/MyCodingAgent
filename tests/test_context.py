@@ -622,6 +622,24 @@ def test_history_is_never_rewritten_by_compaction(sample_git_repo):
     assert json.dumps(context.history, ensure_ascii=False) == before
 
 
+def test_invalidate_compaction_drops_stale_handoff_but_keeps_history(sample_git_repo):
+    context = make_context(sample_git_repo, transcript=20000)
+    context.add_user_request("inspect a.py")
+    context._compaction = {
+        "covered": 1,
+        "summary": "[Context Handoff]\nold a.py conclusion",
+        "ledger": {"read": {"a.py": {"whole": True, "lines": 10, "ranges": []}}},
+    }
+    before = json.dumps(context.history, ensure_ascii=False)
+
+    context.invalidate_compaction()
+    messages = context.messages("inspect a.py")
+
+    assert json.dumps(context.history, ensure_ascii=False) == before
+    assert not any("old a.py conclusion" in str(message.get("content", "")) for message in messages)
+    assert context._compaction == {"covered": 0, "summary": "", "ledger": {}}
+
+
 def test_compaction_lands_below_the_target_not_above_it(sample_git_repo):
     context = make_context(sample_git_repo, transcript=20000)
     context.add_user_request("inspect")

@@ -4,7 +4,12 @@ import json
 import pytest
 
 from coding_agent.repository import Workspace
-from coding_agent.session import SessionError, SessionStore
+from coding_agent.session import (
+    SessionError,
+    SessionStore,
+    reconcile_checkpoint,
+    workspace_snapshot,
+)
 
 
 def test_session_store_creates_and_round_trips_state(sample_git_repo):
@@ -28,3 +33,63 @@ def test_session_store_rejects_repository_mismatch(sample_git_repo, tmp_path):
     store.path_for(session.session_id).write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(SessionError, match="different repository"):
         store.load(session.session_id)
+
+
+def test_session_has_recovery_state_and_round_trips_it(sample_git_repo):
+    store = SessionStore(Workspace(sample_git_repo))
+    session = store.create()
+
+    assert session.checkpoints == {"active": None, "recent": []}
+    assert session.resume_state["status"] == "clean"
+    assert session.runtime_identity["repo_root"] == str(Workspace(sample_git_repo).root)
+
+    session.checkpoints["active"] = {"id": "cp-1", "status": "running"}
+    session.resume_state = {"status": "resume_required", "checkpoint_id": "cp-1"}
+    store.save(session)
+    loaded = store.load(session.session_id)
+
+    assert loaded.checkpoints["active"]["id"] == "cp-1"
+    assert loaded.resume_state["status"] == "resume_required"
+
+
+def test_reconcile_write_checkpoint_when_expected_content_is_already_present(sample_git_repo):
+    target = sample_git_repo / "result.txt"
+    target.write_text("done\n", encoding="utf-8")
+    checkpoint = {
+        "id": "cp-1",
+        "status": "interrupted",
+        "calls": [{
+            "id": "w-1",
+            "name": "write_file",
+            "arguments": {"path": "result.txt", "content": "done\n"},
+            "status": "running",
+            "workspace_before": {"files": {"result.txt": {"exists": False}}},
+        }],
+    }
+
+    result = reconcile_checkpoint(Workspace(sample_git_repo), checkpoint)
+
+    assert result["resume_state"]["status"] == "reconciled"
+    assert result["tool_results"][0]["result"]["ok"] is True
+    assert result["tool_results"][0]["result"]["recovered"] is True
+
+
+def test_reconcile_patch_checkpoint_does_not_claim_success_without_file_evidence(sample_git_repo):
+    target = sample_git_repo / "result.txt"
+    target.write_text("different\n", encoding="utf-8")
+    checkpoint = {
+        "id": "cp-1",
+        "status": "interrupted",
+        "calls": [{
+            "id": "p-1",
+            "name": "patch_file",
+            "arguments": {"path": "result.txt", "old_text": "before", "new_text": "after"},
+            "status": "running",
+            "workspace_before": {"files": {"result.txt": {"exists": True, "sha256": "old"}}},
+        }],
+    }
+
+    result = reconcile_checkpoint(Workspace(sample_git_repo), checkpoint)
+
+    assert result["resume_state"]["status"] == "resume_required"
+    assert result["tool_results"][0]["result"]["error"]["type"] == "execution_interrupted"
