@@ -1,0 +1,21 @@
+{
+  "run_id": "20260922T064052Z-bc8059",
+  "query": "Explain repo",
+  "repo_root": "F:\\MyCodingAgent\\.pytest-sync\\test_recorder_failure_is_persi0\\repo",
+  "status": "failed",
+  "started_at": "2026-09-22T06:40:52.619889Z",
+  "ended_at": "2026-09-22T06:40:52.623889Z",
+  "events": [
+    {
+      "seq": 1,
+      "type": "run_started"
+    },
+    {
+      "seq": 2,
+      "type": "run_failed",
+      "error_type": "provider_error",
+      "message": "Request failed"
+    }
+  ],
+  "duration_ms": 4.419
+}

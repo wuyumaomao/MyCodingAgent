@@ -25,6 +25,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("query", nargs="+", help="Natural-language question")
     parser.add_argument("--repo", type=Path, default=Path.cwd())
     parser.add_argument("--model")
+    parser.add_argument("--provider", choices=("openai", "deepseek"))
     parser.add_argument("--base-url")
     parser.add_argument("--timeout", type=float)
     parser.add_argument(
@@ -75,6 +76,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         service = AgentService(agent)
         service.recorder = recorder
         answer = service.run(" ".join(args.query), workspace)
+    except KeyboardInterrupt:
+        if recorder is not None and recorder.status == "running":
+            recorder.fail("cancelled", "Run cancelled by user")
+        print("Cancelled by user", file=sys.stderr)
+        if recorder is not None:
+            print(f"Run: {recorder.run_id}", file=sys.stderr)
+            print(f"Trace: {recorder.trace_path}", file=sys.stderr)
+            print(f"Report: {recorder.report_path}", file=sys.stderr)
+        return 130
     except Exception as exc:#抛出了异常，记录是哪里出错了
         if recorder is not None and recorder.status == "running":
             error_type = _error_type(exc)
@@ -122,7 +132,7 @@ def _ask_write_approval(preview: WritePreview) -> bool:
         print(f"+ {_preview_text(preview.new_text or '')}", file=sys.stderr)
     try:
         answer = input("Approve this write? [y/N] ")
-    except (EOFError, KeyboardInterrupt):
+    except EOFError:
         return False
     return answer.strip().lower() in {"y", "yes"}
 
@@ -134,7 +144,7 @@ def _ask_shell_approval(preview: ShellPreview) -> bool:
     print(f"Timeout: {preview.timeout:g} seconds", file=sys.stderr)
     try:
         answer = input("Approve this command? [y/N] ")
-    except (EOFError, KeyboardInterrupt):
+    except EOFError:
         return False
     return answer.strip().lower() in {"y", "yes"}
 

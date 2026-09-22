@@ -1,0 +1,182 @@
+{
+  "run_id": "20260922T064054Z-30e8d2",
+  "query": "read",
+  "repo_root": "F:\\MyCodingAgent\\.pytest-sync\\test_trace_records_schema_reje0\\sample-repo",
+  "status": "completed",
+  "started_at": "2026-09-22T06:40:54.231693Z",
+  "ended_at": "2026-09-22T06:40:54.298598Z",
+  "events": [
+    {
+      "seq": 1,
+      "type": "run_started"
+    },
+    {
+      "seq": 2,
+      "type": "llm_request",
+      "round": 1,
+      "message_count": 3,
+      "prompt_chars": 2547,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a coding agent. Use only the provided tools, stay inside the repository workspace, and explain findings based on evidence. The repository navigation map in the next message lists the source files and their sizes — use it to pick a target instead of exploring the tree. When only part of a file matters, locate it with search and read the range around the hit; prefer one or two medium ranges over many small ones, and read a file whole only when it is small or the whole file really is the evidence. If python or pytest fails because target dependencies are missing, request approval to run uv sync --dev, then retry the command. For file writes or patches, directly call write_file or patch_file. Do not ask for approval in ordinary text; those tools automatically request user approval. When multiple known files are independent, prefer returning multiple tool calls in the same response instead of reading one file per round. Compressed historical tool results are not complete evidence; when details are missing, call readfile again with start and end line numbers. When using search, prefer the smallest known directory such as src or tests; use the repository root only when the location is unknown."
+        },
+        {
+          "role": "system",
+          "content": "[Repository Context]\nroot: <workspace>\nimportant_files:\n- README.md\n- pyproject.toml\n- package.json\n- AGENTS.md\n- .env.example\nsource_files:\n- scripts/dev.sh (36 B)\n- src/index.js (31 B)\n- tests/index.test.js (58 B)\n\ncandidate_dirs:\n- src/\n- tests/\n- scripts/\n\nignored_runtime_dirs:\n- .git/\n- .coding-agent/\n- .codex/\n- .venv/\n- .pytest_cache/\n- __pycache__/\n- node_modules/\n- dist/\n- build/\n\nnavigation_hint:\nUse readfile for known files.\nUse search with the narrowest known directory.\nUse listfiles only when more structure is needed.\ntruncated: false\n\n[Important Files]\n### README.md\nstatus: present\n### pyproject.toml\nstatus: missing\n### package.json\nstatus: present\n### AGENTS.md\nstatus: missing\n### .env.example\nstatus: missing\n\n[Git Status]\n?? .gitignore\n?? README.md\n?? package.json\n?? scripts/\n?? src/\n?? tests/\n\n[Runtime Environment]\ntarget_venv: missing\ntarget_python: unavailable\ndependency_sync: approve 'uv sync --dev' when target dependencies are missing"
+        },
+        {
+          "role": "user",
+          "content": "read"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "readfile",
+            "description": "",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "seq": 3,
+      "type": "llm_response",
+      "round": 1,
+      "has_content": false,
+      "tool_call_count": 1,
+      "duration_ms": 0.009,
+      "finish_reason": null,
+      "finish_reason_source": null,
+      "api_attempts": 1,
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "bad-1",
+          "name": "readfile",
+          "arguments": {
+            "path": 123
+          }
+        }
+      ]
+    },
+    {
+      "seq": 4,
+      "type": "tool_call",
+      "id": "bad-1",
+      "name": "readfile",
+      "arguments": {
+        "path": 123
+      }
+    },
+    {
+      "seq": 5,
+      "type": "tool_result",
+      "id": "bad-1",
+      "name": "readfile",
+      "ok": false,
+      "error_type": "invalid_tool_arguments",
+      "duration_ms": 1.262,
+      "result": {
+        "ok": false,
+        "error": {
+          "type": "invalid_tool_arguments",
+          "message": "Tool arguments do not match the registered schema"
+        }
+      }
+    },
+    {
+      "seq": 6,
+      "type": "llm_request",
+      "round": 2,
+      "message_count": 5,
+      "prompt_chars": 2878,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a coding agent. Use only the provided tools, stay inside the repository workspace, and explain findings based on evidence. The repository navigation map in the next message lists the source files and their sizes — use it to pick a target instead of exploring the tree. When only part of a file matters, locate it with search and read the range around the hit; prefer one or two medium ranges over many small ones, and read a file whole only when it is small or the whole file really is the evidence. If python or pytest fails because target dependencies are missing, request approval to run uv sync --dev, then retry the command. For file writes or patches, directly call write_file or patch_file. Do not ask for approval in ordinary text; those tools automatically request user approval. When multiple known files are independent, prefer returning multiple tool calls in the same response instead of reading one file per round. Compressed historical tool results are not complete evidence; when details are missing, call readfile again with start and end line numbers. When using search, prefer the smallest known directory such as src or tests; use the repository root only when the location is unknown."
+        },
+        {
+          "role": "system",
+          "content": "[Repository Context]\nroot: <workspace>\nimportant_files:\n- README.md\n- pyproject.toml\n- package.json\n- AGENTS.md\n- .env.example\nsource_files:\n- scripts/dev.sh (36 B)\n- src/index.js (31 B)\n- tests/index.test.js (58 B)\n\ncandidate_dirs:\n- src/\n- tests/\n- scripts/\n\nignored_runtime_dirs:\n- .git/\n- .coding-agent/\n- .codex/\n- .venv/\n- .pytest_cache/\n- __pycache__/\n- node_modules/\n- dist/\n- build/\n\nnavigation_hint:\nUse readfile for known files.\nUse search with the narrowest known directory.\nUse listfiles only when more structure is needed.\ntruncated: false\n\n[Important Files]\n### README.md\nstatus: present\n### pyproject.toml\nstatus: missing\n### package.json\nstatus: present\n### AGENTS.md\nstatus: missing\n### .env.example\nstatus: missing\n\n[Git Status]\n?? .gitignore\n?? README.md\n?? package.json\n?? scripts/\n?? src/\n?? tests/\n\n[Runtime Environment]\ntarget_venv: missing\ntarget_python: unavailable\ndependency_sync: approve 'uv sync --dev' when target dependencies are missing"
+        },
+        {
+          "role": "user",
+          "content": "read"
+        },
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "bad-1",
+              "type": "function",
+              "function": {
+                "name": "readfile",
+                "arguments": "{\"path\": 123}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "bad-1",
+          "content": "{\"ok\": false, \"error\": {\"type\": \"invalid_tool_arguments\", \"message\": \"Tool arguments do not match the registered schema\"}}"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "readfile",
+            "description": "",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "seq": 7,
+      "type": "llm_response",
+      "round": 2,
+      "has_content": true,
+      "tool_call_count": 0,
+      "duration_ms": 0.007,
+      "finish_reason": null,
+      "finish_reason_source": null,
+      "api_attempts": 1,
+      "content": "done",
+      "tool_calls": []
+    },
+    {
+      "seq": 8,
+      "type": "final_answer",
+      "content": "done"
+    }
+  ],
+  "duration_ms": 67.219
+}

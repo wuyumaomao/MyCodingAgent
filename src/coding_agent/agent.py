@@ -19,6 +19,7 @@ from .session import (
     SessionState,
     SessionStore,
     begin_checkpoint,
+    cancel_checkpoint,
     finish_checkpoint,
     mark_checkpoint_result,
     mark_checkpoint_running,
@@ -85,6 +86,13 @@ class AgentLoop:
         self.compaction_summarizer = compaction_summarizer
 
     def run(self, query: str, workspace: Workspace, *, event_sink: Any | None = None) -> str:
+        try:
+            return self._run(query, workspace, event_sink=event_sink)
+        except KeyboardInterrupt:
+            self._mark_run_cancelled(reason="keyboard_interrupt")
+            raise
+
+    def _run(self, query: str, workspace: Workspace, *, event_sink: Any | None = None) -> str:
         sink = event_sink or (RecorderEventSink(self.recorder) if self.recorder else NullEventSink())
         #构造prompt前缀
         memory = MemoryManager(self.session, summary_provider=self.summary_provider, event_sink=sink) if self.session is not None else None
@@ -102,10 +110,24 @@ class AgentLoop:
             memory.begin_run(query)
             self._resume_active_checkpoint(context, memory, workspace)
         context.add_user_request(query)
-        tool_executor = ToolExecutor(self.registry, self.limits, sink)
         run_id = self.recorder.run_id if self.recorder is not None else f"session-{int(time.time() * 1000)}"
+        if self.session is not None:
+            self.session.run_state = {
+                "status": "running",
+                "run_id": run_id,
+                "query": query,
+                "round": 0,
+                "reason": None,
+                "started_at": _now(),
+                "ended_at": None,
+            }
+            if self.session_store is not None:
+                self.session_store.save(self.session)
+        tool_executor = ToolExecutor(self.registry, self.limits, sink)
         seen_compaction = 0
         for round_number in range(1, self.max_rounds + 1):
+            if self.session is not None:
+                self.session.run_state["round"] = round_number
             messages = context.messages(query if memory is not None else None)#获取要发送的信息
             if context.compaction_serial != seen_compaction:
                 # 压缩把旧工具结果换成了摘要，被压掉的结果可以重新读取。
@@ -142,6 +164,8 @@ class AgentLoop:
                     exc.public_message,
                     duration_ms=_duration_ms(request_started),
                 )
+                if self.session is not None:
+                    self.session.run_state.update({"status": "failed", "reason": exc.error_type, "ended_at": _now()})
                 if self.session is not None and self.session_store is not None:
                     self.session_store.save(self.session)
                 raise AgentError(exc.public_message) from exc
@@ -176,6 +200,10 @@ class AgentLoop:
                     if self.session_store is not None:
                         self.session_store.save(self.session)
                 sink.complete(answer)
+                if self.session is not None:
+                    self.session.run_state.update({"status": "completed", "ended_at": _now()})
+                    if self.session_store is not None:
+                        self.session_store.save(self.session)
                 return answer
             if self.session is not None and self.session_store is not None:
                 begin_checkpoint(self.session, run_id, round_number, turn.tool_calls, workspace)
@@ -212,13 +240,30 @@ class AgentLoop:
             self.session_store.save(self.session)
         answer = f"Reached the round limit of {self.max_rounds} before the task was complete."
         sink.fail("round_limit", "Reached the round limit")
+        if self.session is not None:
+            self.session.run_state.update({"status": "failed", "reason": "round_limit", "ended_at": _now()})
+            if self.session_store is not None:
+                self.session_store.save(self.session)
         return answer
+
+    def _mark_run_cancelled(self, *, reason: str) -> None:
+        if self.session is None:
+            return
+        self.session.run_state.update({"status": "cancelled", "reason": reason, "ended_at": _now()})
+        active = self.session.checkpoints.get("active")
+        if not isinstance(active, dict) and self.session.history and self.session.history[-1].get("role") == "user":
+            self.session.history.append({"role": "assistant", "content": "Task cancelled by user."})
+        if self.session_store is not None:
+            self.session_store.save(self.session)
 
     def _resume_active_checkpoint(self, context: ConversationContext, memory: MemoryManager, workspace: Workspace) -> None:
         if self.session is None or self.session_store is None:
             return
         active = self.session.checkpoints.get("active")
         if not isinstance(active, dict):
+            return
+        if self.session.run_state.get("status") == "cancelled" and self.session.run_state.get("run_id") == active.get("run_id"):
+            self._recover_cancelled_checkpoint(context, memory, active)
             return
         mismatches = runtime_identity_mismatches(self.session, self.runtime_identity)
         if mismatches:
@@ -282,6 +327,57 @@ class AgentLoop:
         self.session.resume_state = reconciliation["resume_state"]
         finish_checkpoint(self.session)
         self.session.resume_state = reconciliation["resume_state"]
+        self.session_store.save(self.session)
+
+    def _recover_cancelled_checkpoint(self, context: ConversationContext, memory: MemoryManager, active: dict[str, Any]) -> None:
+        known_ids = {
+            str(call.get("id"))
+            for message in context.history
+            if message.get("role") == "assistant"
+            for call in message.get("tool_calls", [])
+        }
+        known_result_ids = {
+            str(message.get("tool_call_id"))
+            for message in context.history
+            if message.get("role") == "tool" and message.get("tool_call_id") is not None
+        }
+        calls = [
+            ToolCall(str(item.get("id")), str(item.get("name")), dict(item.get("arguments") or {}))
+            for item in active.get("calls") or []
+            if isinstance(item, dict) and str(item.get("id")) not in known_ids
+        ]
+        if calls:
+            context.add_assistant_turn(AssistantTurn(None, calls))
+        unresolved: list[dict[str, Any]] = []
+        for item in active.get("calls") or []:
+            if not isinstance(item, dict):
+                continue
+            call_id = str(item.get("id"))
+            if call_id in known_result_ids:
+                continue
+            was_running = item.get("status") in {"running", "interrupted"}
+            if was_running:
+                unresolved.append({"id": call_id, "tool": str(item.get("name", "")), "state": "unknown"})
+            result = {
+                "ok": False,
+                "error": {
+                    "type": "execution_interrupted" if was_running else "execution_cancelled",
+                    "message": "Tool execution was interrupted by user cancellation" if was_running else "Tool call was cancelled by user",
+                },
+            }
+            call = ToolCall(call_id, str(item.get("name", "")), dict(item.get("arguments") or {}))
+            context.add_tool_result(call, result)
+            memory.observe_tool_result(call, result, run_id=self.session.session_id, round_number=int(active.get("round", 0) or 0))
+        cancel_checkpoint(self.session, reason=str(self.session.run_state.get("reason") or "keyboard_interrupt"))
+        resume_state = {
+            "status": "cancelled",
+            "checkpoint_id": active.get("id"),
+            "checked_at": _now(),
+            "workspace_changed": False,
+            "unresolved_calls": unresolved,
+        }
+        finish_checkpoint(self.session, status="cancelled")
+        self.session.resume_state = resume_state
         self.session_store.save(self.session)
 
 def _duration_ms(started: float) -> float:

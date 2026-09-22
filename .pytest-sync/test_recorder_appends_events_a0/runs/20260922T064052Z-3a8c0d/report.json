@@ -1,0 +1,28 @@
+{
+  "run_id": "20260922T064052Z-3a8c0d",
+  "query": "Explain repo",
+  "repo_root": "F:\\MyCodingAgent\\.pytest-sync\\test_recorder_appends_events_a0\\repo",
+  "status": "completed",
+  "started_at": "2026-09-22T06:40:52.596689Z",
+  "ended_at": "2026-09-22T06:40:52.605886Z",
+  "events": [
+    {
+      "seq": 1,
+      "type": "run_started"
+    },
+    {
+      "seq": 2,
+      "type": "tool_call",
+      "name": "readfile",
+      "arguments": {
+        "path": "README.md"
+      }
+    },
+    {
+      "seq": 3,
+      "type": "final_answer",
+      "content": "Done"
+    }
+  ],
+  "duration_ms": 8.449
+}

@@ -39,6 +39,18 @@ def empty_resume_state() -> dict[str, Any]:
     return {"status": "clean", "checkpoint_id": None, "checked_at": None, "workspace_changed": False, "unresolved_calls": []}
 
 
+def empty_run_state() -> dict[str, Any]:
+    return {
+        "status": "idle",
+        "run_id": None,
+        "query": None,
+        "round": 0,
+        "reason": None,
+        "started_at": None,
+        "ended_at": None,
+    }
+
+
 def default_runtime_identity(repo_root: Path) -> dict[str, Any]:
     return {
         "repo_root": str(Path(repo_root).resolve()),
@@ -50,6 +62,7 @@ def default_runtime_identity(repo_root: Path) -> dict[str, Any]:
 def update_runtime_identity(
     session: SessionState,
     *,
+    provider: str | None = None,
     model: str | None = None,
     context_window_tokens: int | None = None,
 ) -> None:
@@ -62,6 +75,8 @@ def update_runtime_identity(
     # loop can detect a model/context change instead of silently overwriting it.
     if model and "model" not in identity:
         identity["model"] = model
+    if provider and "provider" not in identity:
+        identity["provider"] = provider
     if context_window_tokens is not None and "context_window_tokens" not in identity:
         identity["context_window_tokens"] = context_window_tokens
     session.runtime_identity = identity
@@ -73,7 +88,7 @@ def runtime_identity_mismatches(session: SessionState, current: dict[str, Any] |
         return []
     persisted = session.runtime_identity or {}
     mismatches: list[str] = []
-    for key in ("repo_root", "platform", "python", "model", "context_window_tokens"):
+    for key in ("repo_root", "platform", "python", "provider", "model", "context_window_tokens"):
         if key in persisted and key in current and persisted[key] != current[key]:
             mismatches.append(key)
     return mismatches
@@ -87,6 +102,7 @@ class SessionState:
     memory: dict[str, Any] = field(default_factory=empty_memory)
     checkpoints: dict[str, Any] = field(default_factory=empty_checkpoints)
     resume_state: dict[str, Any] = field(default_factory=empty_resume_state)
+    run_state: dict[str, Any] = field(default_factory=empty_run_state)
     runtime_identity: dict[str, Any] = field(default_factory=dict)
     created_at: str = ""
     updated_at: str = ""
@@ -133,6 +149,7 @@ class SessionStore:
                 history=list(payload.get("history", [])), memory=dict(payload.get("memory", empty_memory())),
                 checkpoints=dict(payload.get("checkpoints") or empty_checkpoints()),
                 resume_state=dict(payload.get("resume_state") or empty_resume_state()),
+                run_state=dict(payload.get("run_state") or empty_run_state()),
                 runtime_identity={**default_runtime_identity(repo_root), **dict(payload.get("runtime_identity") or {})},
                 created_at=str(payload.get("created_at", "")), updated_at=str(payload.get("updated_at", "")),
             )
@@ -154,6 +171,7 @@ class SessionStore:
             "memory": _sanitize(session.memory),
             "checkpoints": _sanitize(session.checkpoints),
             "resume_state": _sanitize(session.resume_state),
+            "run_state": _sanitize(session.run_state),
             "runtime_identity": _sanitize(session.runtime_identity or default_runtime_identity(session.repo_root)),
         }
         target = self.path_for(session.session_id)
@@ -308,17 +326,34 @@ def mark_checkpoint_result(session: SessionState, call_id: str, result: dict[str
             return
 
 
-def finish_checkpoint(session: SessionState) -> None:
+def finish_checkpoint(session: SessionState, *, status: str = "completed") -> None:
     active = session.checkpoints.get("active")
     if not isinstance(active, dict):
         return
-    active["status"] = "completed"
+    active["status"] = status
     active["updated_at"] = _now()
     recent = session.checkpoints.setdefault("recent", [])
     recent.append(active)
     del recent[:-10]
     session.checkpoints["active"] = None
     session.resume_state = empty_resume_state()
+
+
+def cancel_checkpoint(session: SessionState, reason: str = "keyboard_interrupt") -> dict[str, Any] | None:
+    """Mark an active checkpoint as user-cancelled without replaying tools."""
+    active = session.checkpoints.get("active")
+    if not isinstance(active, dict):
+        return None
+    for item in active.get("calls") or []:
+        if not isinstance(item, dict) or item.get("status") in {"completed", "completed_error", "reconciled"}:
+            continue
+        item["status"] = "interrupted" if item.get("status") == "running" else "cancelled"
+        item["cancel_reason"] = reason
+        item["updated_at"] = _now()
+    active["status"] = "cancelled"
+    active["cancel_reason"] = reason
+    active["updated_at"] = _now()
+    return active
 
 
 def _reconcile_call(workspace: Workspace, name: str, arguments: dict[str, Any], before: dict[str, Any]) -> dict[str, Any]:

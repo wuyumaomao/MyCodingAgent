@@ -1,0 +1,103 @@
+{
+  "run_id": "20260922T064041Z-c90c75",
+  "query": "Create file",
+  "repo_root": "F:\\MyCodingAgent\\.pytest-sync\\test_cli_write_tool_denied_doe0\\sample-repo",
+  "status": "completed",
+  "started_at": "2026-09-22T06:40:41.521244Z",
+  "ended_at": "2026-09-22T06:40:41.702847Z",
+  "events": [
+    {
+      "seq": 1,
+      "type": "run_started"
+    },
+    {
+      "seq": 2,
+      "type": "llm_request",
+      "round": 1,
+      "message_count": 4,
+      "prompt_chars": 6405,
+      "session_id": "20260922T064041Z-2dd3a4",
+      "snapshot_chars": 157,
+      "history_covered": 0,
+      "dropped_groups": 0,
+      "stable_prefix_chars": 0,
+      "transcript_chars": 44,
+      "compaction_threshold_chars": 547200
+    },
+    {
+      "seq": 3,
+      "type": "llm_response",
+      "round": 1,
+      "has_content": false,
+      "tool_call_count": 1,
+      "duration_ms": 0.006,
+      "finish_reason": null,
+      "finish_reason_source": null,
+      "api_attempts": 1
+    },
+    {
+      "seq": 4,
+      "type": "tool_call",
+      "id": "write-1",
+      "name": "write_file",
+      "arguments": {
+        "path": "new.py",
+        "content_bytes": 2
+      }
+    },
+    {
+      "seq": 5,
+      "type": "approval_request",
+      "operation": "create",
+      "path": "new.py",
+      "existed": false
+    },
+    {
+      "seq": 6,
+      "type": "approval_result",
+      "operation": "create",
+      "path": "new.py",
+      "decision": "denied"
+    },
+    {
+      "seq": 7,
+      "type": "tool_result",
+      "id": "write-1",
+      "name": "write_file",
+      "ok": false,
+      "error_type": "approval_denied",
+      "duration_ms": 13.79
+    },
+    {
+      "seq": 8,
+      "type": "llm_request",
+      "round": 2,
+      "message_count": 6,
+      "prompt_chars": 6851,
+      "session_id": "20260922T064041Z-2dd3a4",
+      "snapshot_chars": 267,
+      "history_covered": 0,
+      "dropped_groups": 0,
+      "stable_prefix_chars": 2379,
+      "transcript_chars": 399,
+      "compaction_threshold_chars": 547200
+    },
+    {
+      "seq": 9,
+      "type": "llm_response",
+      "round": 2,
+      "has_content": true,
+      "tool_call_count": 0,
+      "duration_ms": 0.008,
+      "finish_reason": null,
+      "finish_reason_source": null,
+      "api_attempts": 1
+    },
+    {
+      "seq": 10,
+      "type": "final_answer",
+      "content": "not written"
+    }
+  ],
+  "duration_ms": 181.908
+}

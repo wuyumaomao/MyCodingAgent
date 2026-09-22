@@ -69,12 +69,32 @@ def test_loop_executes_tool_and_returns_final_answer(sample_git_repo):
             AssistantTurn("The repository uses npm scripts.", []),
         ]
     )
-    answer = AgentLoop(llm, make_registry(sample_git_repo), build_repository_context, max_rounds=4).run(
-        "Explain scripts", Workspace(sample_git_repo)
+    workspace = Workspace(sample_git_repo)
+    store = SessionStore(workspace)
+    session = store.create()
+    answer = AgentLoop(llm, make_registry(sample_git_repo), build_repository_context, max_rounds=4, session=session, session_store=store).run(
+        "Explain scripts", workspace
     )
     assert answer == "The repository uses npm scripts."
     assert llm.calls == 2
     assert any(message.get("role") == "tool" for message in llm.messages[-1])
+    assert store.load(session.session_id).run_state["status"] == "completed"
+
+
+def test_loop_marks_run_cancelled_when_model_is_interrupted(sample_git_repo):
+    class InterruptingLLM:
+        def complete(self, messages, tools):
+            raise KeyboardInterrupt
+
+    workspace = Workspace(sample_git_repo)
+    store = SessionStore(workspace)
+    session = store.create()
+    loop = AgentLoop(InterruptingLLM(), make_registry(sample_git_repo), session=session, session_store=store)
+    with __import__("pytest").raises(KeyboardInterrupt):
+        loop.run("Inspect", workspace)
+    loaded = store.load(session.session_id)
+    assert loaded.run_state["status"] == "cancelled"
+    assert loaded.run_state["reason"] == "keyboard_interrupt"
 
 
 def test_loop_stops_after_four_tool_rounds(sample_git_repo):

@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_TIMEOUT = 600.0
+SUPPORTED_PROVIDERS = frozenset({"openai", "deepseek"})
 
 
 class ConfigError(ValueError):
@@ -20,6 +21,7 @@ class ConfigError(ValueError):
 class Settings:
     api_key: str
     model: str
+    provider: str = "openai"
     base_url: str = DEFAULT_BASE_URL
     timeout: float = DEFAULT_TIMEOUT
     context_window_tokens: int | None = None
@@ -27,15 +29,20 @@ class Settings:
     @classmethod
     def from_args_and_env(cls, args: Namespace) -> "Settings":
         load_dotenv(dotenv_path=Path.cwd() / ".env")
-        api_key = getattr(args, "api_key", None) or os.getenv("CODING_AGENT_API_KEY")
-        model = getattr(args, "model", None) or os.getenv("CODING_AGENT_MODEL")
+        provider = (getattr(args, "provider", None) or os.getenv("CODING_AGENT_PROVIDER") or "openai").lower()
+        if provider not in SUPPORTED_PROVIDERS:
+            raise ConfigError(f"Unsupported provider: {provider}")
+        prefix = provider.upper()
+        api_key = getattr(args, "api_key", None) or os.getenv(f"{prefix}_API_KEY") or os.getenv("CODING_AGENT_API_KEY")
+        model = getattr(args, "model", None) or os.getenv(f"{prefix}_MODEL") or os.getenv("CODING_AGENT_MODEL")
         base_url = (
             getattr(args, "base_url", None)
+            or os.getenv(f"{prefix}_BASE_URL")
             or os.getenv("CODING_AGENT_BASE_URL")
             or DEFAULT_BASE_URL
         )
         arg_timeout = getattr(args, "timeout", None)
-        timeout_value = arg_timeout if arg_timeout is not None else os.getenv("CODING_AGENT_TIMEOUT")
+        timeout_value = arg_timeout if arg_timeout is not None else os.getenv(f"{prefix}_TIMEOUT") or os.getenv("CODING_AGENT_TIMEOUT")
         if timeout_value is None:
             timeout = DEFAULT_TIMEOUT
         else:
@@ -49,7 +56,7 @@ class Settings:
         context_value = (
             arg_context_window
             if arg_context_window is not None
-            else os.getenv("CODING_AGENT_CONTEXT_WINDOW_TOKENS")
+            else os.getenv(f"{prefix}_CONTEXT_WINDOW_TOKENS") or os.getenv("CODING_AGENT_CONTEXT_WINDOW_TOKENS")
         )
         if context_value is None or context_value == "":
             context_window_tokens = None
@@ -65,6 +72,7 @@ class Settings:
         if not model:
             raise ConfigError("Model is required (set CODING_AGENT_MODEL)")
         return cls(
+            provider=provider,
             api_key=api_key,
             model=model,
             base_url=base_url,

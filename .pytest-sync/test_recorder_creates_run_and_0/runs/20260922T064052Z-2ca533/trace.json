@@ -1,0 +1,14 @@
+{
+  "run_id": "20260922T064052Z-2ca533",
+  "query": "Explain repo",
+  "repo_root": "F:\\MyCodingAgent\\.pytest-sync\\test_recorder_creates_run_and_0\\repo",
+  "status": "running",
+  "started_at": "2026-09-22T06:40:52.580685Z",
+  "ended_at": null,
+  "events": [
+    {
+      "seq": 1,
+      "type": "run_started"
+    }
+  ]
+}

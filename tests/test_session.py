@@ -52,6 +52,18 @@ def test_session_has_recovery_state_and_round_trips_it(sample_git_repo):
     assert loaded.resume_state["status"] == "resume_required"
 
 
+def test_session_run_state_defaults_and_round_trips(sample_git_repo):
+    store = SessionStore(Workspace(sample_git_repo))
+    session = store.create()
+    assert session.run_state["status"] == "idle"
+    session.run_state.update({"status": "cancelled", "run_id": "run-1", "reason": "keyboard_interrupt"})
+    store.save(session)
+    loaded = store.load(session.session_id)
+    assert loaded.run_state["status"] == "cancelled"
+    assert loaded.run_state["run_id"] == "run-1"
+    assert loaded.run_state["reason"] == "keyboard_interrupt"
+
+
 def test_reconcile_write_checkpoint_when_expected_content_is_already_present(sample_git_repo):
     target = sample_git_repo / "result.txt"
     target.write_text("done\n", encoding="utf-8")

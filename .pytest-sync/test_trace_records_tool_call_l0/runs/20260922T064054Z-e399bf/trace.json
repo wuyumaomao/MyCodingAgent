@@ -1,0 +1,196 @@
+{
+  "run_id": "20260922T064054Z-e399bf",
+  "query": "read",
+  "repo_root": "F:\\MyCodingAgent\\.pytest-sync\\test_trace_records_tool_call_l0\\sample-repo",
+  "status": "completed",
+  "started_at": "2026-09-22T06:40:54.026170Z",
+  "ended_at": "2026-09-22T06:40:54.161691Z",
+  "events": [
+    {
+      "seq": 1,
+      "type": "run_started"
+    },
+    {
+      "seq": 2,
+      "type": "llm_request",
+      "round": 1,
+      "message_count": 3,
+      "prompt_chars": 3489
+    },
+    {
+      "seq": 3,
+      "type": "llm_response",
+      "round": 1,
+      "has_content": false,
+      "tool_call_count": 1,
+      "duration_ms": 0.008,
+      "finish_reason": null,
+      "finish_reason_source": null,
+      "api_attempts": 1
+    },
+    {
+      "seq": 4,
+      "type": "tool_call",
+      "id": "c0",
+      "name": "listfiles",
+      "arguments": {
+        "path": "dir0"
+      }
+    },
+    {
+      "seq": 5,
+      "type": "tool_result",
+      "id": "c0",
+      "name": "listfiles",
+      "ok": false,
+      "error_type": "invalid_arguments",
+      "duration_ms": 3.065
+    },
+    {
+      "seq": 6,
+      "type": "llm_request",
+      "round": 2,
+      "message_count": 5,
+      "prompt_chars": 3793
+    },
+    {
+      "seq": 7,
+      "type": "llm_response",
+      "round": 2,
+      "has_content": false,
+      "tool_call_count": 1,
+      "duration_ms": 0.007,
+      "finish_reason": null,
+      "finish_reason_source": null,
+      "api_attempts": 1
+    },
+    {
+      "seq": 8,
+      "type": "tool_call",
+      "id": "c1",
+      "name": "listfiles",
+      "arguments": {
+        "path": "dir1"
+      }
+    },
+    {
+      "seq": 9,
+      "type": "tool_result",
+      "id": "c1",
+      "name": "listfiles",
+      "ok": false,
+      "error_type": "invalid_arguments",
+      "duration_ms": 2.646
+    },
+    {
+      "seq": 10,
+      "type": "llm_request",
+      "round": 3,
+      "message_count": 7,
+      "prompt_chars": 4097
+    },
+    {
+      "seq": 11,
+      "type": "llm_response",
+      "round": 3,
+      "has_content": false,
+      "tool_call_count": 1,
+      "duration_ms": 0.008,
+      "finish_reason": null,
+      "finish_reason_source": null,
+      "api_attempts": 1
+    },
+    {
+      "seq": 12,
+      "type": "tool_call",
+      "id": "c2",
+      "name": "listfiles",
+      "arguments": {
+        "path": "dir2"
+      }
+    },
+    {
+      "seq": 13,
+      "type": "tool_call_limit",
+      "name": "listfiles",
+      "max_calls": 2,
+      "observed": 2
+    },
+    {
+      "seq": 14,
+      "type": "tool_result",
+      "id": "c2",
+      "name": "listfiles",
+      "ok": false,
+      "error_type": "tool_call_limit",
+      "duration_ms": 0.0
+    },
+    {
+      "seq": 15,
+      "type": "llm_request",
+      "round": 4,
+      "message_count": 9,
+      "prompt_chars": 4440
+    },
+    {
+      "seq": 16,
+      "type": "llm_response",
+      "round": 4,
+      "has_content": false,
+      "tool_call_count": 1,
+      "duration_ms": 0.008,
+      "finish_reason": null,
+      "finish_reason_source": null,
+      "api_attempts": 1
+    },
+    {
+      "seq": 17,
+      "type": "tool_call",
+      "id": "c3",
+      "name": "listfiles",
+      "arguments": {
+        "path": "dir3"
+      }
+    },
+    {
+      "seq": 18,
+      "type": "tool_call_limit",
+      "name": "listfiles",
+      "max_calls": 2,
+      "observed": 2
+    },
+    {
+      "seq": 19,
+      "type": "tool_result",
+      "id": "c3",
+      "name": "listfiles",
+      "ok": false,
+      "error_type": "tool_call_limit",
+      "duration_ms": 0.0
+    },
+    {
+      "seq": 20,
+      "type": "llm_request",
+      "round": 5,
+      "message_count": 11,
+      "prompt_chars": 4783
+    },
+    {
+      "seq": 21,
+      "type": "llm_response",
+      "round": 5,
+      "has_content": true,
+      "tool_call_count": 0,
+      "duration_ms": 0.009,
+      "finish_reason": null,
+      "finish_reason_source": null,
+      "api_attempts": 1
+    },
+    {
+      "seq": 22,
+      "type": "final_answer",
+      "content": "done"
+    }
+  ],
+  "duration_ms": 134.914
+}

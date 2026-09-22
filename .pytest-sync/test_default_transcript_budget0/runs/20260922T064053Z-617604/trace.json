@@ -1,0 +1,45 @@
+{
+  "run_id": "20260922T064053Z-617604",
+  "query": "Explain",
+  "repo_root": "F:\\MyCodingAgent\\.pytest-sync\\test_default_transcript_budget0\\sample-repo",
+  "status": "completed",
+  "started_at": "2026-09-22T06:40:53.054066Z",
+  "ended_at": "2026-09-22T06:40:53.100573Z",
+  "events": [
+    {
+      "seq": 1,
+      "type": "run_started"
+    },
+    {
+      "seq": 2,
+      "type": "llm_request",
+      "round": 1,
+      "message_count": 4,
+      "prompt_chars": 3702,
+      "session_id": "20260922T064053Z-6267bb",
+      "snapshot_chars": 153,
+      "history_covered": 0,
+      "dropped_groups": 0,
+      "stable_prefix_chars": 0,
+      "transcript_chars": 40,
+      "compaction_threshold_chars": 547200
+    },
+    {
+      "seq": 3,
+      "type": "llm_response",
+      "round": 1,
+      "has_content": true,
+      "tool_call_count": 0,
+      "duration_ms": 0.006,
+      "finish_reason": null,
+      "finish_reason_source": null,
+      "api_attempts": 1
+    },
+    {
+      "seq": 4,
+      "type": "final_answer",
+      "content": "Done"
+    }
+  ],
+  "duration_ms": 46.446
+}

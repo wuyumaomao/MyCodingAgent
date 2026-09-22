@@ -1,0 +1,14 @@
+{
+  "run_id": "20260922T064040Z-58533a",
+  "query": "status",
+  "repo_root": "F:\\MyCodingAgent\\.pytest-sync\\test_cli_passes_shell_timeout_0\\sample-repo",
+  "status": "running",
+  "started_at": "2026-09-22T06:40:40.640942Z",
+  "ended_at": null,
+  "events": [
+    {
+      "seq": 1,
+      "type": "run_started"
+    }
+  ]
+}

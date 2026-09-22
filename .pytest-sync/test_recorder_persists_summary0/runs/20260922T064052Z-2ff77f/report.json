@@ -1,0 +1,26 @@
+{
+  "run_id": "20260922T064052Z-2ff77f",
+  "query": "q",
+  "repo_root": "F:\\MyCodingAgent\\.pytest-sync\\test_recorder_persists_summary0\\repo",
+  "status": "running",
+  "started_at": "2026-09-22T06:40:52.638937Z",
+  "ended_at": null,
+  "events": [
+    {
+      "seq": 1,
+      "type": "run_started"
+    },
+    {
+      "seq": 2,
+      "type": "llm_request",
+      "round": 1,
+      "message_count": 3,
+      "messages": [
+        {
+          "role": "user",
+          "content": "q"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,105 @@
+{
+  "run_id": "20260922T064040Z-acbb8d",
+  "query": "check",
+  "repo_root": "F:\\MyCodingAgent\\.pytest-sync\\test_cli_shell_command_is_reje0\\sample-repo",
+  "status": "completed",
+  "started_at": "2026-09-22T06:40:40.987911Z",
+  "ended_at": "2026-09-22T06:40:41.173569Z",
+  "events": [
+    {
+      "seq": 1,
+      "type": "run_started"
+    },
+    {
+      "seq": 2,
+      "type": "llm_request",
+      "round": 1,
+      "message_count": 4,
+      "prompt_chars": 6393,
+      "session_id": "20260922T064040Z-42decf",
+      "snapshot_chars": 151,
+      "history_covered": 0,
+      "dropped_groups": 0,
+      "stable_prefix_chars": 0,
+      "transcript_chars": 38,
+      "compaction_threshold_chars": 547200
+    },
+    {
+      "seq": 3,
+      "type": "llm_response",
+      "round": 1,
+      "has_content": false,
+      "tool_call_count": 1,
+      "duration_ms": 0.005,
+      "finish_reason": null,
+      "finish_reason_source": null,
+      "api_attempts": 1
+    },
+    {
+      "seq": 4,
+      "type": "tool_call",
+      "id": "shell-1",
+      "name": "shell",
+      "arguments": {
+        "program": "pytest",
+        "args": [
+          "tests"
+        ]
+      }
+    },
+    {
+      "seq": 5,
+      "type": "approval_request",
+      "operation": "shell",
+      "program": "pytest",
+      "cwd": "."
+    },
+    {
+      "seq": 6,
+      "type": "approval_result",
+      "operation": "shell",
+      "program": "pytest",
+      "decision": "required"
+    },
+    {
+      "seq": 7,
+      "type": "tool_result",
+      "id": "shell-1",
+      "name": "shell",
+      "ok": false,
+      "error_type": "approval_required",
+      "duration_ms": 12.252
+    },
+    {
+      "seq": 8,
+      "type": "llm_request",
+      "round": 2,
+      "message_count": 6,
+      "prompt_chars": 6886,
+      "session_id": "20260922T064040Z-42decf",
+      "snapshot_chars": 282,
+      "history_covered": 0,
+      "dropped_groups": 0,
+      "stable_prefix_chars": 2373,
+      "transcript_chars": 419,
+      "compaction_threshold_chars": 547200
+    },
+    {
+      "seq": 9,
+      "type": "llm_response",
+      "round": 2,
+      "has_content": true,
+      "tool_call_count": 0,
+      "duration_ms": 0.008,
+      "finish_reason": null,
+      "finish_reason_source": null,
+      "api_attempts": 1
+    },
+    {
+      "seq": 10,
+      "type": "final_answer",
+      "content": "approval needed"
+    }
+  ],
+  "duration_ms": 185.336
+}

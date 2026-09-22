@@ -1,0 +1,91 @@
+{
+  "run_id": "20260922T064042Z-b94cb7",
+  "query": "second",
+  "repo_root": "F:\\MyCodingAgent\\.pytest-sync\\test_agent_uses_current_record0\\sample-repo",
+  "status": "completed",
+  "started_at": "2026-09-22T06:40:42.266347Z",
+  "ended_at": "2026-09-22T06:40:42.405901Z",
+  "events": [
+    {
+      "seq": 1,
+      "type": "run_started"
+    },
+    {
+      "seq": 2,
+      "type": "llm_request",
+      "round": 1,
+      "message_count": 3,
+      "prompt_chars": 6186
+    },
+    {
+      "seq": 3,
+      "type": "llm_response",
+      "round": 1,
+      "has_content": false,
+      "tool_call_count": 1,
+      "duration_ms": 0.005,
+      "finish_reason": null,
+      "finish_reason_source": null,
+      "api_attempts": 1
+    },
+    {
+      "seq": 4,
+      "type": "tool_call",
+      "id": "s2",
+      "name": "shell",
+      "arguments": {
+        "program": "pytest",
+        "args": [
+          "tests"
+        ]
+      }
+    },
+    {
+      "seq": 5,
+      "type": "approval_request",
+      "operation": "shell",
+      "program": "pytest",
+      "cwd": "."
+    },
+    {
+      "seq": 6,
+      "type": "approval_result",
+      "operation": "shell",
+      "program": "pytest",
+      "decision": "approved"
+    },
+    {
+      "seq": 7,
+      "type": "tool_result",
+      "id": "s2",
+      "name": "shell",
+      "ok": true,
+      "error_type": null,
+      "duration_ms": 8.158
+    },
+    {
+      "seq": 8,
+      "type": "llm_request",
+      "round": 2,
+      "message_count": 5,
+      "prompt_chars": 6617
+    },
+    {
+      "seq": 9,
+      "type": "llm_response",
+      "round": 2,
+      "has_content": true,
+      "tool_call_count": 0,
+      "duration_ms": 0.005,
+      "finish_reason": null,
+      "finish_reason_source": null,
+      "api_attempts": 1
+    },
+    {
+      "seq": 10,
+      "type": "final_answer",
+      "content": "second"
+    }
+  ],
+  "duration_ms": 140.082
+}

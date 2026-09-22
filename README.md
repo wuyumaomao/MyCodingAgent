@@ -38,6 +38,20 @@ copy .env.example .env
 
 `.env` 会被自动读取且不会提交到 Git。也可以直接设置同名环境变量。
 
+支持在同一个 `.env` 中保存多个 provider profile。默认使用 `CODING_AGENT_PROVIDER`，切换时只改 provider，不需要重新输入密钥：
+
+```dotenv
+CODING_AGENT_PROVIDER=openai
+OPENAI_API_KEY=...
+OPENAI_MODEL=gpt-...
+OPENAI_BASE_URL=https://api.openai.com/v1
+DEEPSEEK_API_KEY=...
+DEEPSEEK_MODEL=deepseek-chat
+DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
+```
+
+也可以对单次运行使用 `--provider openai` 或 `--provider deepseek`。当前两个 profile 都通过 OpenAI-compatible Chat Completions 接口访问；旧的 `CODING_AGENT_API_KEY`、`CODING_AGENT_MODEL` 和 `CODING_AGENT_BASE_URL` 变量仍作为兼容回退。
+
 运行查询：
 
 ```bash

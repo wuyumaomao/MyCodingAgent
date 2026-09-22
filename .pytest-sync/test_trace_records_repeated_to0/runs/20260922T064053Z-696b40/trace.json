@@ -1,0 +1,203 @@
+{
+  "run_id": "20260922T064053Z-696b40",
+  "query": "read",
+  "repo_root": "F:\\MyCodingAgent\\.pytest-sync\\test_trace_records_repeated_to0\\sample-repo",
+  "status": "completed",
+  "started_at": "2026-09-22T06:40:53.828131Z",
+  "ended_at": "2026-09-22T06:40:53.964654Z",
+  "events": [
+    {
+      "seq": 1,
+      "type": "run_started"
+    },
+    {
+      "seq": 2,
+      "type": "llm_request",
+      "round": 1,
+      "message_count": 3,
+      "prompt_chars": 3489
+    },
+    {
+      "seq": 3,
+      "type": "llm_response",
+      "round": 1,
+      "has_content": false,
+      "tool_call_count": 1,
+      "duration_ms": 0.01,
+      "finish_reason": null,
+      "finish_reason_source": null,
+      "api_attempts": 1
+    },
+    {
+      "seq": 4,
+      "type": "tool_call",
+      "id": "c0",
+      "name": "readfile",
+      "arguments": {
+        "path": "README.md"
+      }
+    },
+    {
+      "seq": 5,
+      "type": "tool_result",
+      "id": "c0",
+      "name": "readfile",
+      "ok": true,
+      "error_type": null,
+      "duration_ms": 3.24
+    },
+    {
+      "seq": 6,
+      "type": "llm_request",
+      "round": 2,
+      "message_count": 5,
+      "prompt_chars": 3969
+    },
+    {
+      "seq": 7,
+      "type": "llm_response",
+      "round": 2,
+      "has_content": false,
+      "tool_call_count": 1,
+      "duration_ms": 0.009,
+      "finish_reason": null,
+      "finish_reason_source": null,
+      "api_attempts": 1
+    },
+    {
+      "seq": 8,
+      "type": "tool_call",
+      "id": "c1",
+      "name": "readfile",
+      "arguments": {
+        "path": "README.md"
+      }
+    },
+    {
+      "seq": 9,
+      "type": "tool_call_repeat",
+      "name": "readfile",
+      "reason": "already_succeeded",
+      "failures": 0
+    },
+    {
+      "seq": 10,
+      "type": "tool_result",
+      "id": "c1",
+      "name": "readfile",
+      "ok": false,
+      "error_type": "repeated_tool_call",
+      "duration_ms": 0.0
+    },
+    {
+      "seq": 11,
+      "type": "llm_request",
+      "round": 3,
+      "message_count": 7,
+      "prompt_chars": 4448
+    },
+    {
+      "seq": 12,
+      "type": "llm_response",
+      "round": 3,
+      "has_content": false,
+      "tool_call_count": 1,
+      "duration_ms": 0.01,
+      "finish_reason": null,
+      "finish_reason_source": null,
+      "api_attempts": 1
+    },
+    {
+      "seq": 13,
+      "type": "tool_call",
+      "id": "c2",
+      "name": "readfile",
+      "arguments": {
+        "path": "README.md"
+      }
+    },
+    {
+      "seq": 14,
+      "type": "tool_call_repeat",
+      "name": "readfile",
+      "reason": "already_succeeded",
+      "failures": 0
+    },
+    {
+      "seq": 15,
+      "type": "tool_result",
+      "id": "c2",
+      "name": "readfile",
+      "ok": false,
+      "error_type": "repeated_tool_call",
+      "duration_ms": 0.0
+    },
+    {
+      "seq": 16,
+      "type": "llm_request",
+      "round": 4,
+      "message_count": 9,
+      "prompt_chars": 4927
+    },
+    {
+      "seq": 17,
+      "type": "llm_response",
+      "round": 4,
+      "has_content": false,
+      "tool_call_count": 1,
+      "duration_ms": 0.009,
+      "finish_reason": null,
+      "finish_reason_source": null,
+      "api_attempts": 1
+    },
+    {
+      "seq": 18,
+      "type": "tool_call",
+      "id": "c3",
+      "name": "readfile",
+      "arguments": {
+        "path": "README.md"
+      }
+    },
+    {
+      "seq": 19,
+      "type": "tool_call_repeat",
+      "name": "readfile",
+      "reason": "already_succeeded",
+      "failures": 0
+    },
+    {
+      "seq": 20,
+      "type": "tool_result",
+      "id": "c3",
+      "name": "readfile",
+      "ok": false,
+      "error_type": "repeated_tool_call",
+      "duration_ms": 0.0
+    },
+    {
+      "seq": 21,
+      "type": "llm_request",
+      "round": 5,
+      "message_count": 11,
+      "prompt_chars": 5406
+    },
+    {
+      "seq": 22,
+      "type": "llm_response",
+      "round": 5,
+      "has_content": true,
+      "tool_call_count": 0,
+      "duration_ms": 0.01,
+      "finish_reason": null,
+      "finish_reason_source": null,
+      "api_attempts": 1
+    },
+    {
+      "seq": 23,
+      "type": "final_answer",
+      "content": "done"
+    }
+  ],
+  "duration_ms": 135.686
+}

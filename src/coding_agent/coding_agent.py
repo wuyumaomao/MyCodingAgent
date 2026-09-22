@@ -91,6 +91,7 @@ class CodingAgent:
                 model=settings.model,
                 base_url=settings.base_url,
                 timeout=settings.timeout,
+                provider=settings.provider,
             )
         else:
             client = llm_client
@@ -98,6 +99,7 @@ class CodingAgent:
             # Store only facts needed for safe recovery; never persist API credentials.
             update_runtime_identity(
                 session,
+                provider=getattr(settings, "provider", None),
                 model=getattr(settings, "model", None),
                 context_window_tokens=settings.context_window_tokens,
             )
@@ -115,6 +117,7 @@ class CodingAgent:
             transcript_budget_chars=transcript_budget_chars,
             context_window_tokens=settings.context_window_tokens,
             runtime_identity={
+                "provider": settings.provider,
                 "repo_root": str(workspace.root),
                 "platform": sys.platform,
                 "python": platform.python_version(),
@@ -134,6 +137,7 @@ class CodingAgent:
             self.loop.session_store = SessionStore(self.workspace)
             update_runtime_identity(
                 session,
+                provider=getattr(self.loop.llm_client, "provider", None),
                 model=getattr(self.loop.llm_client, "model", None),
                 context_window_tokens=self.loop.context_window_tokens,
             )

@@ -1,0 +1,126 @@
+{
+  "run_id": "20260922T064021Z-24d6fe",
+  "query": "读取 README.md，将其中的占位句替换为：This repository is evaluated by the coding agent benchmark.",
+  "repo_root": "F:\\MyCodingAgent\\.pytest-sync\\test_fake_runner_executes_all_0\\runs\\fake\\fixtures\\readme_patch_basic-anx95y2n",
+  "status": "completed",
+  "started_at": "2026-09-22T06:40:21.222123Z",
+  "ended_at": "2026-09-22T06:40:21.345645Z",
+  "events": [
+    {
+      "seq": 1,
+      "type": "run_started"
+    },
+    {
+      "seq": 2,
+      "type": "llm_request",
+      "round": 1,
+      "message_count": 3,
+      "prompt_chars": 3551
+    },
+    {
+      "seq": 3,
+      "type": "llm_response",
+      "round": 1,
+      "has_content": false,
+      "tool_call_count": 1,
+      "duration_ms": 0.065,
+      "finish_reason": null,
+      "finish_reason_source": null,
+      "api_attempts": 1
+    },
+    {
+      "seq": 4,
+      "type": "tool_call",
+      "id": "read-1",
+      "name": "readfile",
+      "arguments": {
+        "path": "README.md"
+      }
+    },
+    {
+      "seq": 5,
+      "type": "tool_result",
+      "id": "read-1",
+      "name": "readfile",
+      "ok": true,
+      "error_type": null,
+      "duration_ms": 7.586
+    },
+    {
+      "seq": 6,
+      "type": "llm_request",
+      "round": 2,
+      "message_count": 5,
+      "prompt_chars": 4048
+    },
+    {
+      "seq": 7,
+      "type": "llm_response",
+      "round": 2,
+      "has_content": false,
+      "tool_call_count": 1,
+      "duration_ms": 0.084,
+      "finish_reason": null,
+      "finish_reason_source": null,
+      "api_attempts": 1
+    },
+    {
+      "seq": 8,
+      "type": "tool_call",
+      "id": "patch-1",
+      "name": "patch_file",
+      "arguments": {
+        "path": "README.md",
+        "old_text_bytes": 17,
+        "new_text_bytes": 59
+      }
+    },
+    {
+      "seq": 9,
+      "type": "approval_request",
+      "operation": "patch",
+      "path": "README.md",
+      "existed": true
+    },
+    {
+      "seq": 10,
+      "type": "approval_result",
+      "operation": "patch",
+      "path": "README.md",
+      "decision": "approved"
+    },
+    {
+      "seq": 11,
+      "type": "tool_result",
+      "id": "patch-1",
+      "name": "patch_file",
+      "ok": true,
+      "error_type": null,
+      "duration_ms": 14.194
+    },
+    {
+      "seq": 12,
+      "type": "llm_request",
+      "round": 3,
+      "message_count": 7,
+      "prompt_chars": 4487
+    },
+    {
+      "seq": 13,
+      "type": "llm_response",
+      "round": 3,
+      "has_content": true,
+      "tool_call_count": 0,
+      "duration_ms": 0.091,
+      "finish_reason": null,
+      "finish_reason_source": null,
+      "api_attempts": 1
+    },
+    {
+      "seq": 14,
+      "type": "final_answer",
+      "content": "README updated successfully."
+    }
+  ],
+  "duration_ms": 122.327
+}

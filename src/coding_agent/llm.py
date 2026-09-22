@@ -24,8 +24,10 @@ class LLMClient:
         model: str,
         base_url: str | None = None,
         timeout: float = 600.0,
+        provider: str = "openai",
     ) -> None:
         self.model = model
+        self.provider = provider
         self.response_parser = ResponseParser()
         # Disable SDK-level retries so the gateway owns retry accounting.
         kwargs: dict[str, Any] = {"api_key": api_key, "timeout": timeout, "max_retries": 0}

@@ -1,0 +1,11 @@
+✓ Lockfile passes supply-chain policies (verified 2d ago)
+Progress: resolved 1, reused 0, downloaded 0, added 0
+Packages: +4
+++++
+Progress: resolved 8, reused 5, downloaded 3, added 4, done
+[WARN] Issues with peer dependencies found. Run "pnpm peers check" to list them.
+
+dependencies:
++ whale-girl github:vlln/whale-girl#main
+
+Done in 49.6s using pnpm v12.4.2

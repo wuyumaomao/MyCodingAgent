@@ -1,0 +1,21 @@
+{
+  "run_id": "20260922T064039Z-2a9742",
+  "query": "Explain",
+  "repo_root": "F:\\MyCodingAgent\\.pytest-sync\\test_cli_creates_failed_trace0\\sample-repo",
+  "status": "failed",
+  "started_at": "2026-09-22T06:40:39.696858Z",
+  "ended_at": "2026-09-22T06:40:39.741874Z",
+  "events": [
+    {
+      "seq": 1,
+      "type": "run_started"
+    },
+    {
+      "seq": 2,
+      "type": "run_failed",
+      "error_type": "runtime_error",
+      "message": "The coding agent failed to start"
+    }
+  ],
+  "duration_ms": 45.184
+}

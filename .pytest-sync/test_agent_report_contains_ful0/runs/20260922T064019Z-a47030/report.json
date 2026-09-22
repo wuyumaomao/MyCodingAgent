@@ -1,0 +1,257 @@
+{
+  "run_id": "20260922T064019Z-a47030",
+  "query": "read",
+  "repo_root": "F:\\MyCodingAgent\\.pytest-sync\\test_agent_report_contains_ful0\\sample-repo",
+  "status": "completed",
+  "started_at": "2026-09-22T06:40:19.151185Z",
+  "ended_at": "2026-09-22T06:40:19.200187Z",
+  "events": [
+    {
+      "seq": 1,
+      "type": "run_started"
+    },
+    {
+      "seq": 2,
+      "type": "llm_request",
+      "round": 1,
+      "message_count": 3,
+      "prompt_chars": 3489,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a coding agent. Use only the provided tools, stay inside the repository workspace, and explain findings based on evidence. The repository navigation map in the next message lists the source files and their sizes — use it to pick a target instead of exploring the tree. When only part of a file matters, locate it with search and read the range around the hit; prefer one or two medium ranges over many small ones, and read a file whole only when it is small or the whole file really is the evidence. If python or pytest fails because target dependencies are missing, request approval to run uv sync --dev, then retry the command. For file writes or patches, directly call write_file or patch_file. Do not ask for approval in ordinary text; those tools automatically request user approval. When multiple known files are independent, prefer returning multiple tool calls in the same response instead of reading one file per round. Compressed historical tool results are not complete evidence; when details are missing, call readfile again with start and end line numbers. When using search, prefer the smallest known directory such as src or tests; use the repository root only when the location is unknown."
+        },
+        {
+          "role": "system",
+          "content": "[Repository Context]\nroot: <workspace>\nimportant_files:\n- README.md\n- pyproject.toml\n- package.json\n- AGENTS.md\n- .env.example\nsource_files:\n- scripts/dev.sh (36 B)\n- src/index.js (31 B)\n- tests/index.test.js (58 B)\n\ncandidate_dirs:\n- src/\n- tests/\n- scripts/\n\nignored_runtime_dirs:\n- .git/\n- .coding-agent/\n- .codex/\n- .venv/\n- .pytest_cache/\n- __pycache__/\n- node_modules/\n- dist/\n- build/\n\nnavigation_hint:\nUse readfile for known files.\nUse search with the narrowest known directory.\nUse listfiles only when more structure is needed.\ntruncated: false\n\n[Important Files]\n### README.md\nstatus: present\n### pyproject.toml\nstatus: missing\n### package.json\nstatus: present\n### AGENTS.md\nstatus: missing\n### .env.example\nstatus: missing\n\n[Git Status]\n?? .gitignore\n?? README.md\n?? package.json\n?? scripts/\n?? src/\n?? tests/\n\n[Runtime Environment]\ntarget_venv: missing\ntarget_python: unavailable\ndependency_sync: approve 'uv sync --dev' when target dependencies are missing"
+        },
+        {
+          "role": "user",
+          "content": "read"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "listfiles",
+            "description": "List files and directories inside the repository workspace.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "Repository-relative directory."
+                },
+                "max_depth": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "max_entries": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "readfile",
+            "description": "Read a UTF-8 text file inside the repository workspace. Optionally provide one-based inclusive start and end line numbers for a focused range. The result ends with a footer telling you exactly which lines you received and the start value to continue from, so never guess the next range. A line longer than 2000 characters is truncated and marked.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "Repository-relative file path."
+                },
+                "start": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "First line to return (one-based)."
+                },
+                "end": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "Last line to return (inclusive, one-based)."
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "seq": 3,
+      "type": "llm_response",
+      "round": 1,
+      "has_content": false,
+      "tool_call_count": 1,
+      "duration_ms": 0.005,
+      "finish_reason": null,
+      "finish_reason_source": null,
+      "api_attempts": 1,
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "c1",
+          "name": "readfile",
+          "arguments": {
+            "path": "README.md"
+          }
+        }
+      ]
+    },
+    {
+      "seq": 4,
+      "type": "tool_call",
+      "id": "c1",
+      "name": "readfile",
+      "arguments": {
+        "path": "README.md"
+      }
+    },
+    {
+      "seq": 5,
+      "type": "tool_result",
+      "id": "c1",
+      "name": "readfile",
+      "ok": true,
+      "error_type": null,
+      "duration_ms": 1.757,
+      "result": {
+        "ok": true,
+        "path": "README.md",
+        "content": "1: # Sample Repository\n2: \n3: This fixture contains a small project with development and test scripts.",
+        "start": 1,
+        "end": 3,
+        "line_count": 3,
+        "truncated": false,
+        "footer": "(End of file - total 3 lines.)"
+      }
+    },
+    {
+      "seq": 6,
+      "type": "llm_request",
+      "round": 2,
+      "message_count": 5,
+      "prompt_chars": 3969,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a coding agent. Use only the provided tools, stay inside the repository workspace, and explain findings based on evidence. The repository navigation map in the next message lists the source files and their sizes — use it to pick a target instead of exploring the tree. When only part of a file matters, locate it with search and read the range around the hit; prefer one or two medium ranges over many small ones, and read a file whole only when it is small or the whole file really is the evidence. If python or pytest fails because target dependencies are missing, request approval to run uv sync --dev, then retry the command. For file writes or patches, directly call write_file or patch_file. Do not ask for approval in ordinary text; those tools automatically request user approval. When multiple known files are independent, prefer returning multiple tool calls in the same response instead of reading one file per round. Compressed historical tool results are not complete evidence; when details are missing, call readfile again with start and end line numbers. When using search, prefer the smallest known directory such as src or tests; use the repository root only when the location is unknown."
+        },
+        {
+          "role": "system",
+          "content": "[Repository Context]\nroot: <workspace>\nimportant_files:\n- README.md\n- pyproject.toml\n- package.json\n- AGENTS.md\n- .env.example\nsource_files:\n- scripts/dev.sh (36 B)\n- src/index.js (31 B)\n- tests/index.test.js (58 B)\n\ncandidate_dirs:\n- src/\n- tests/\n- scripts/\n\nignored_runtime_dirs:\n- .git/\n- .coding-agent/\n- .codex/\n- .venv/\n- .pytest_cache/\n- __pycache__/\n- node_modules/\n- dist/\n- build/\n\nnavigation_hint:\nUse readfile for known files.\nUse search with the narrowest known directory.\nUse listfiles only when more structure is needed.\ntruncated: false\n\n[Important Files]\n### README.md\nstatus: present\n### pyproject.toml\nstatus: missing\n### package.json\nstatus: present\n### AGENTS.md\nstatus: missing\n### .env.example\nstatus: missing\n\n[Git Status]\n?? .gitignore\n?? README.md\n?? package.json\n?? scripts/\n?? src/\n?? tests/\n\n[Runtime Environment]\ntarget_venv: missing\ntarget_python: unavailable\ndependency_sync: approve 'uv sync --dev' when target dependencies are missing"
+        },
+        {
+          "role": "user",
+          "content": "read"
+        },
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "c1",
+              "type": "function",
+              "function": {
+                "name": "readfile",
+                "arguments": "{\"path\": \"README.md\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "c1",
+          "content": "{\"ok\": true, \"path\": \"README.md\", \"content\": \"1: # Sample Repository\\n2: \\n3: This fixture contains a small project with development and test scripts.\", \"start\": 1, \"end\": 3, \"line_count\": 3, \"truncated\": false, \"footer\": \"(End of file - total 3 lines.)\"}"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "listfiles",
+            "description": "List files and directories inside the repository workspace.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "Repository-relative directory."
+                },
+                "max_depth": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "max_entries": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "readfile",
+            "description": "Read a UTF-8 text file inside the repository workspace. Optionally provide one-based inclusive start and end line numbers for a focused range. The result ends with a footer telling you exactly which lines you received and the start value to continue from, so never guess the next range. A line longer than 2000 characters is truncated and marked.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "Repository-relative file path."
+                },
+                "start": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "First line to return (one-based)."
+                },
+                "end": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "Last line to return (inclusive, one-based)."
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "seq": 7,
+      "type": "llm_response",
+      "round": 2,
+      "has_content": true,
+      "tool_call_count": 0,
+      "duration_ms": 0.005,
+      "finish_reason": null,
+      "finish_reason_source": null,
+      "api_attempts": 1,
+      "content": "done",
+      "tool_calls": []
+    },
+    {
+      "seq": 8,
+      "type": "final_answer",
+      "content": "done"
+    }
+  ],
+  "duration_ms": 49.749
+}

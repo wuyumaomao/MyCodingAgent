@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from argparse import Namespace
 import json
+import pytest
 
 from coding_agent.cli import main
 from coding_agent.config import Settings
@@ -36,6 +37,45 @@ def test_settings_use_cli_over_environment(monkeypatch):
     assert settings.api_key == "env-key"
     assert settings.model == "cli-model"
     assert settings.base_url == "https://env.example/v1"
+
+
+def test_settings_loads_selected_deepseek_profile(monkeypatch):
+    monkeypatch.setenv("CODING_AGENT_PROVIDER", "deepseek")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek-key")
+    monkeypatch.setenv("DEEPSEEK_MODEL", "deepseek-chat")
+    monkeypatch.setenv("DEEPSEEK_BASE_URL", "https://api.deepseek.example/v1")
+    monkeypatch.setenv("DEEPSEEK_CONTEXT_WINDOW_TOKENS", "128000")
+
+    settings = Settings.from_args_and_env(
+        Namespace(provider=None, api_key=None, model=None, base_url=None, timeout=None, context_window_tokens=None)
+    )
+
+    assert settings.provider == "deepseek"
+    assert settings.api_key == "deepseek-key"
+    assert settings.model == "deepseek-chat"
+    assert settings.base_url == "https://api.deepseek.example/v1"
+    assert settings.context_window_tokens == 128000
+
+
+def test_settings_cli_provider_and_model_override_profile(monkeypatch):
+    monkeypatch.setenv("CODING_AGENT_PROVIDER", "deepseek")
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-key")
+    monkeypatch.setenv("OPENAI_MODEL", "gpt-default")
+
+    settings = Settings.from_args_and_env(
+        Namespace(provider="openai", api_key=None, model="gpt-override", base_url=None, timeout=None, context_window_tokens=None)
+    )
+
+    assert settings.provider == "openai"
+    assert settings.api_key == "openai-key"
+    assert settings.model == "gpt-override"
+
+
+def test_settings_rejects_unknown_provider(monkeypatch):
+    with __import__("pytest").raises(ValueError, match="Unsupported provider"):
+        Settings.from_args_and_env(
+            Namespace(provider="other", api_key=None, model=None, base_url=None, timeout=None, context_window_tokens=None)
+        )
 
 
 def test_settings_load_dotenv_file(monkeypatch, tmp_path):
@@ -233,6 +273,14 @@ def test_ask_write_approval_accepts_only_yes(monkeypatch, sample_git_repo):
     assert _ask_write_approval(WritePreview("create", "new.py", content="hello")) is False
 
 
+def test_ask_write_approval_propagates_keyboard_interrupt(monkeypatch):
+    from coding_agent.cli import _ask_write_approval
+
+    monkeypatch.setattr("builtins.input", lambda _: (_ for _ in ()).throw(KeyboardInterrupt))
+    with pytest.raises(KeyboardInterrupt):
+        _ask_write_approval(WritePreview("create", "new.py", content="hello"))
+
+
 def test_cli_shell_approval_accepts_only_yes(monkeypatch):
     from coding_agent.cli import _ask_shell_approval
 
@@ -240,6 +288,14 @@ def test_cli_shell_approval_accepts_only_yes(monkeypatch):
     assert _ask_shell_approval(ShellPreview("git", ["status"], ".", 60)) is True
     monkeypatch.setattr("builtins.input", lambda _: "no")
     assert _ask_shell_approval(ShellPreview("git", ["status"], ".", 60)) is False
+
+
+def test_cli_shell_approval_propagates_keyboard_interrupt(monkeypatch):
+    from coding_agent.cli import _ask_shell_approval
+
+    monkeypatch.setattr("builtins.input", lambda _: (_ for _ in ()).throw(KeyboardInterrupt))
+    with pytest.raises(KeyboardInterrupt):
+        _ask_shell_approval(ShellPreview("git", ["status"], ".", 60))
 
 
 def test_cli_passes_shell_timeout_to_policy(monkeypatch, sample_git_repo, tmp_path):

@@ -1,0 +1,110 @@
+{
+  "run_id": "20260922T064021Z-adaf0f",
+  "query": "读取仓库内的 README.md 并简要说明其用途。",
+  "repo_root": "F:\\MyCodingAgent\\.pytest-sync\\test_fake_runner_executes_all_0\\runs\\fake\\fixtures\\path_escape_recovery-1581eris",
+  "status": "completed",
+  "started_at": "2026-09-22T06:40:21.750927Z",
+  "ended_at": "2026-09-22T06:40:21.851717Z",
+  "events": [
+    {
+      "seq": 1,
+      "type": "run_started"
+    },
+    {
+      "seq": 2,
+      "type": "llm_request",
+      "round": 1,
+      "message_count": 3,
+      "prompt_chars": 2979
+    },
+    {
+      "seq": 3,
+      "type": "llm_response",
+      "round": 1,
+      "has_content": false,
+      "tool_call_count": 1,
+      "duration_ms": 0.04,
+      "finish_reason": null,
+      "finish_reason_source": null,
+      "api_attempts": 1
+    },
+    {
+      "seq": 4,
+      "type": "tool_call",
+      "id": "bad-1",
+      "name": "readfile",
+      "arguments": {
+        "path": "../README.md"
+      }
+    },
+    {
+      "seq": 5,
+      "type": "tool_result",
+      "id": "bad-1",
+      "name": "readfile",
+      "ok": false,
+      "error_type": "workspace_violation",
+      "duration_ms": 6.126
+    },
+    {
+      "seq": 6,
+      "type": "llm_request",
+      "round": 2,
+      "message_count": 5,
+      "prompt_chars": 3307
+    },
+    {
+      "seq": 7,
+      "type": "llm_response",
+      "round": 2,
+      "has_content": false,
+      "tool_call_count": 1,
+      "duration_ms": 0.078,
+      "finish_reason": null,
+      "finish_reason_source": null,
+      "api_attempts": 1
+    },
+    {
+      "seq": 8,
+      "type": "tool_call",
+      "id": "read-1",
+      "name": "readfile",
+      "arguments": {
+        "path": "README.md"
+      }
+    },
+    {
+      "seq": 9,
+      "type": "tool_result",
+      "id": "read-1",
+      "name": "readfile",
+      "ok": true,
+      "error_type": null,
+      "duration_ms": 5.078
+    },
+    {
+      "seq": 10,
+      "type": "llm_request",
+      "round": 3,
+      "message_count": 7,
+      "prompt_chars": 3798
+    },
+    {
+      "seq": 11,
+      "type": "llm_response",
+      "round": 3,
+      "has_content": true,
+      "tool_call_count": 0,
+      "duration_ms": 0.089,
+      "finish_reason": null,
+      "finish_reason_source": null,
+      "api_attempts": 1
+    },
+    {
+      "seq": 12,
+      "type": "final_answer",
+      "content": "This repository is a coding agent benchmark fixture."
+    }
+  ],
+  "duration_ms": 100.545
+}
