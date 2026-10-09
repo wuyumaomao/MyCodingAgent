@@ -45,11 +45,13 @@ def test_session_has_recovery_state_and_round_trips_it(sample_git_repo):
 
     session.checkpoints["active"] = {"id": "cp-1", "status": "running"}
     session.resume_state = {"status": "resume_required", "checkpoint_id": "cp-1"}
+    session.cancelled_runs = [{"run_id": "run-1", "start": 0, "end": 2}]
     store.save(session)
     loaded = store.load(session.session_id)
 
     assert loaded.checkpoints["active"]["id"] == "cp-1"
     assert loaded.resume_state["status"] == "resume_required"
+    assert loaded.cancelled_runs == [{"run_id": "run-1", "start": 0, "end": 2}]
 
 
 def test_session_run_state_defaults_and_round_trips(sample_git_repo):

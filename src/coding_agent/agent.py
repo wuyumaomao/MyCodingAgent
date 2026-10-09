@@ -105,8 +105,10 @@ class AgentLoop:
             **({"transcript_budget_chars": self.transcript_budget_chars} if self.transcript_budget_chars is not None else {}),
             **({"context_window_tokens": self.context_window_tokens} if self.context_window_tokens is not None else {}),
         )
+        history_start = len(self.session.history) if self.session is not None else None
         if self.session is not None:
             context.history = self.session.history
+            context.history_exclusions = self.session.cancelled_runs
             memory.begin_run(query)
             self._resume_active_checkpoint(context, memory, workspace)
         context.add_user_request(query)
@@ -120,6 +122,8 @@ class AgentLoop:
                 "reason": None,
                 "started_at": _now(),
                 "ended_at": None,
+                "history_start": history_start,
+                "history_end": None,
             }
             if self.session_store is not None:
                 self.session_store.save(self.session)
@@ -250,9 +254,19 @@ class AgentLoop:
         if self.session is None:
             return
         self.session.run_state.update({"status": "cancelled", "reason": reason, "ended_at": _now()})
+        start = self.session.run_state.get("history_start")
+        if isinstance(start, int):
+            if not isinstance(self.session.cancelled_runs, list):
+                self.session.cancelled_runs = []
+            record = {"run_id": self.session.run_state.get("run_id"), "start": start, "end": len(self.session.history)}
+            self.session.cancelled_runs.append(record)
+            self.session.run_state["history_end"] = record["end"]
         active = self.session.checkpoints.get("active")
         if not isinstance(active, dict) and self.session.history and self.session.history[-1].get("role") == "user":
             self.session.history.append({"role": "assistant", "content": "Task cancelled by user."})
+        if isinstance(start, int) and self.session.cancelled_runs:
+            self.session.cancelled_runs[-1]["end"] = len(self.session.history)
+            self.session.run_state["history_end"] = len(self.session.history)
         if self.session_store is not None:
             self.session_store.save(self.session)
 
@@ -377,6 +391,11 @@ class AgentLoop:
             "unresolved_calls": unresolved,
         }
         finish_checkpoint(self.session, status="cancelled")
+        for item in reversed(self.session.cancelled_runs):
+            if isinstance(item, dict) and item.get("run_id") == active.get("run_id"):
+                item["end"] = len(self.session.history)
+                self.session.run_state["history_end"] = item["end"]
+                break
         self.session.resume_state = resume_state
         self.session_store.save(self.session)
 

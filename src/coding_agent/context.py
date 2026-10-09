@@ -150,6 +150,7 @@ class ConversationContext:
         if instructions:
             self.system_messages.append({"role": "system", "content": instructions})
         self.history: list[dict[str, Any]] = []
+        self.history_exclusions: list[dict[str, Any]] = []
         self.memory = memory
         self.context_window_tokens = context_window_tokens or DEFAULT_CONTEXT_WINDOW_TOKENS
         if transcript_budget_chars is None:
@@ -327,11 +328,22 @@ class ConversationContext:
         ])
 
     def _history_view(self) -> list[dict[str, Any]]:
-        covered = min(self._compaction["covered"], len(self.history))
+        excluded: set[int] = set()
+        for item in self.history_exclusions:
+            if not isinstance(item, dict):
+                continue
+            try:
+                start = max(0, int(item.get("start", 0)))
+                end = max(start, int(item.get("end", start)))
+            except (TypeError, ValueError):
+                continue
+            excluded.update(range(start, min(end, len(self.history))))
+        visible_history = [message for index, message in enumerate(self.history) if index not in excluded]
+        covered = min(self._compaction["covered"], len(visible_history))
         view: list[dict[str, Any]] = []
         if self._compaction["summary"]:
             view.append({"role": "user", "content": self._handoff_text()})
-        view.extend(copy.deepcopy(self.history[covered:]))
+        view.extend(copy.deepcopy(visible_history[covered:]))
         if _encoded_len(view) <= self.compaction_threshold_chars:
             self._view_chars = _encoded_len(view)
             return view

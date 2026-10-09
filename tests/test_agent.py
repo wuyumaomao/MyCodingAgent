@@ -95,6 +95,7 @@ def test_loop_marks_run_cancelled_when_model_is_interrupted(sample_git_repo):
     loaded = store.load(session.session_id)
     assert loaded.run_state["status"] == "cancelled"
     assert loaded.run_state["reason"] == "keyboard_interrupt"
+    assert loaded.cancelled_runs == [{"run_id": loaded.run_state["run_id"], "start": 0, "end": 2}]
 
 
 def test_loop_stops_after_four_tool_rounds(sample_git_repo):
@@ -465,3 +466,36 @@ def test_recovery_does_not_duplicate_tool_result_already_in_history(sample_git_r
     assert [m for m in llm.messages[0] if m.get("role") == "tool" and m.get("tool_call_id") == "r2"] == [
         existing_result
     ]
+
+
+def test_new_query_excludes_cancelled_run_history(sample_git_repo):
+    workspace = Workspace(sample_git_repo)
+    store = SessionStore(workspace)
+    session = store.create()
+    session.history.extend([
+        {"role": "user", "content": "wrong command A"},
+        {"role": "assistant", "content": None, "tool_calls": [{
+            "id": "p1", "type": "function",
+            "function": {"name": "patch_file", "arguments": json.dumps({"path": "x.py", "old_text": "a", "new_text": "b"})},
+        }]},
+        {"role": "tool", "tool_call_id": "p1", "content": json.dumps({
+            "ok": False, "error": {"type": "execution_interrupted"},
+        })},
+    ])
+    session.checkpoints["active"] = {
+        "id": "cp-cancelled", "run_id": "old-run", "round": 1, "status": "cancelled",
+        "calls": [{"id": "p1", "name": "patch_file", "arguments": {"path": "x.py", "old_text": "a", "new_text": "b"}, "status": "interrupted"}],
+    }
+    session.run_state = {"status": "cancelled", "run_id": "old-run", "query": "wrong command A", "round": 1, "reason": "keyboard_interrupt"}
+    session.cancelled_runs = [{"run_id": "old-run", "start": 0, "end": 3}]
+    store.save(session)
+
+    llm = FakeLLM([AssistantTurn("new task done", [])])
+    loop = AgentLoop(llm, make_registry(sample_git_repo), session=session, session_store=store)
+
+    assert loop.run("new command B", workspace) == "new task done"
+    prompt_text = json.dumps(llm.messages[0], ensure_ascii=False)
+    assert "wrong command A" not in prompt_text
+    assert '"p1"' not in prompt_text
+    assert "x.py" not in prompt_text
+    assert "new command B" in prompt_text

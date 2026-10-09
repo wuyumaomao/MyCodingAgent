@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from argparse import Namespace
 import json
+import os
 import pytest
 
 from coding_agent.cli import main
@@ -92,6 +93,25 @@ def test_settings_load_dotenv_file(monkeypatch, tmp_path):
     assert settings.api_key == "file-key"
     assert settings.model == "file-model"
     assert settings.base_url == "https://file.example/v1"
+
+
+def test_settings_does_not_leak_dotenv_values_into_process_environment(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("CODING_AGENT_PROVIDER", raising=False)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    (tmp_path / ".env").write_text(
+        "CODING_AGENT_PROVIDER=deepseek\n"
+        "DEEPSEEK_API_KEY=file-key\n"
+        "DEEPSEEK_MODEL=file-model\n",
+        encoding="utf-8",
+    )
+
+    settings = Settings.from_args_and_env(Namespace(api_key=None, model=None, base_url=None))
+
+    assert settings.provider == "deepseek"
+    assert settings.api_key == "file-key"
+    assert os.environ.get("CODING_AGENT_PROVIDER") is None
+    assert os.environ.get("DEEPSEEK_API_KEY") is None
 
 
 def test_settings_parse_timeout(monkeypatch):

@@ -48,6 +48,8 @@ def empty_run_state() -> dict[str, Any]:
         "reason": None,
         "started_at": None,
         "ended_at": None,
+        "history_start": None,
+        "history_end": None,
     }
 
 
@@ -103,6 +105,7 @@ class SessionState:
     checkpoints: dict[str, Any] = field(default_factory=empty_checkpoints)
     resume_state: dict[str, Any] = field(default_factory=empty_resume_state)
     run_state: dict[str, Any] = field(default_factory=empty_run_state)
+    cancelled_runs: list[dict[str, Any]] = field(default_factory=list)
     runtime_identity: dict[str, Any] = field(default_factory=dict)
     created_at: str = ""
     updated_at: str = ""
@@ -150,6 +153,7 @@ class SessionStore:
                 checkpoints=dict(payload.get("checkpoints") or empty_checkpoints()),
                 resume_state=dict(payload.get("resume_state") or empty_resume_state()),
                 run_state=dict(payload.get("run_state") or empty_run_state()),
+                cancelled_runs=list(payload.get("cancelled_runs") or []),
                 runtime_identity={**default_runtime_identity(repo_root), **dict(payload.get("runtime_identity") or {})},
                 created_at=str(payload.get("created_at", "")), updated_at=str(payload.get("updated_at", "")),
             )
@@ -172,6 +176,7 @@ class SessionStore:
             "checkpoints": _sanitize(session.checkpoints),
             "resume_state": _sanitize(session.resume_state),
             "run_state": _sanitize(session.run_state),
+            "cancelled_runs": _sanitize(session.cancelled_runs),
             "runtime_identity": _sanitize(session.runtime_identity or default_runtime_identity(session.repo_root)),
         }
         target = self.path_for(session.session_id)
